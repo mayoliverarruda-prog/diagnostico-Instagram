@@ -60,7 +60,7 @@ def gerar_diagnostico():
         content.append({"type": "text", "text": f"Perfil: {arroba}\nNicho: {nicho}\nSeguidores: {seguidores}\nObjetivo: {objetivo}\n{f'Obs: {obs}' if obs else ''}\nGere o diagnostico."})
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-3-5-20241022",
             max_tokens=1000,
             system=SYSTEM_DIAGNOSTICO,
             messages=[{"role": "user", "content": content}]
@@ -168,7 +168,7 @@ def analise_completa():
         content.append({"type": "text", "text": f"Perfil: {sessao['arroba']}\nNicho: {sessao['nicho']}\nProblemas: {', '.join(diag['problemas'])}\nGere a analise completa com solucoes."})
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514"
+            model="claude-3-5-sonnet-4-20241022"
             max_tokens=1000,
             system=SYSTEM_COMPLETO,
             messages=[{"role": "user", "content": content}]
