@@ -26,12 +26,10 @@ analises_cache = {}
 # CONTROLE DE LIMITE GRATUITO POR IP
 # ============================================================
 LIMITE_DIARIO = 2
-# Estrutura: { "ip": { "data": "2026-05-15", "count": 1 } }
 usos_por_ip = {}
 
 
 def get_client_ip():
-    """Pega IP real do usuario (Railway usa proxy, IP vem em X-Forwarded-For)."""
     forwarded = request.headers.get('X-Forwarded-For', '')
     if forwarded:
         return forwarded.split(',')[0].strip()
@@ -39,7 +37,6 @@ def get_client_ip():
 
 
 def verifica_limite_grauito(ip):
-    """Retorna True se o IP ainda pode fazer analise gratuita."""
     hoje = datetime.utcnow().strftime('%Y-%m-%d')
     registro = usos_por_ip.get(ip)
     if not registro or registro.get('data') != hoje:
@@ -48,13 +45,20 @@ def verifica_limite_grauito(ip):
 
 
 def registra_uso_gratuito(ip):
-    """Incrementa contador do IP no dia atual."""
     hoje = datetime.utcnow().strftime('%Y-%m-%d')
     registro = usos_por_ip.get(ip)
     if not registro or registro.get('data') != hoje:
         usos_por_ip[ip] = {'data': hoje, 'count': 1}
     else:
         usos_por_ip[ip]['count'] = registro.get('count', 0) + 1
+
+
+def get_base_url():
+    proto = request.headers.get('X-Forwarded-Proto', 'https')
+    host = request.headers.get('X-Forwarded-Host') or request.host
+    if proto != 'https':
+        proto = 'https'
+    return f"{proto}://{host}"
 
 
 # ============================================================
@@ -85,7 +89,7 @@ ESTRUTURA OBRIGATORIA:
 2. pontos_fortes: 2 pontos positivos REAIS que voce observou no perfil (curtos, especificos)
 3. problemas: 3 pontos de melhoria estrategicos, descritos como oportunidades (curtos, especificos, NAO da solucao)
 4. impacto: o que esses pontos estao impedindo o perfil de alcancar (1 paragrafo, tom analitico, sem drama)
-5. frase_gancho: uma frase curta que cria curiosidade pela analise completa, SEM ameacar. Exemplo de bom tom: "O perfil tem fundacao, mas ainda nao comunica posicionamento de forma clara. A analise completa mostra exatamente o que ajustar."
+5. frase_gancho: uma frase curta que cria curiosidade pela analise completa, SEM ameacar.
 
 NAO entregue solucoes nesta versao. Apenas diagnostico estrategico.
 
@@ -99,19 +103,7 @@ Responda APENAS com JSON valido sem markdown sem backticks: {"bio_reescrita": "n
 
 
 # ============================================================
-# UTILS
-# ============================================================
-def get_base_url():
-    """URL base sempre com https (Railway usa proxy http internamente)."""
-    proto = request.headers.get('X-Forwarded-Proto', 'https')
-    host = request.headers.get('X-Forwarded-Host') or request.host
-    if proto != 'https':
-        proto = 'https'
-    return f"{proto}://{host}"
-
-
-# ============================================================
-# ROTAS
+# ROTAS DE API
 # ============================================================
 @app.route('/')
 def index():
@@ -121,7 +113,6 @@ def index():
 @app.route('/api/diagnostico', methods=['POST'])
 def gerar_diagnostico():
     try:
-        # --- LIMITACAO POR IP ---
         ip = get_client_ip()
         print(f"DEBUG: requisicao do IP {ip}", flush=True)
         if not verifica_limite_grauito(ip):
@@ -170,18 +161,12 @@ def gerar_diagnostico():
             messages=[{"role": "user", "content": content}]
         )
 
-        print(f"DEBUG: resposta recebida: {response.content[0].text[:200]}", flush=True)
-
         raw = response.content[0].text.strip()
         start = raw.find('{')
         end = raw.rfind('}') + 1
         analise = json.loads(raw[start:end])
 
-        print("DEBUG: JSON parsed com sucesso", flush=True)
-
-        # Registra uso APENAS apos sucesso (se der erro, nao gasta a cota)
         registra_uso_gratuito(ip)
-        print(f"DEBUG: IP {ip} usou cota, agora em {usos_por_ip[ip]}", flush=True)
 
         session_id = str(uuid.uuid4())
         analises_cache[session_id] = {
@@ -201,18 +186,13 @@ def gerar_diagnostico():
 def criar_pagamento():
     try:
         if not MP_ACCESS_TOKEN or not sdk:
-            return jsonify({
-                'success': False,
-                'error': 'MP_ACCESS_TOKEN nao configurado no servidor'
-            }), 500
+            return jsonify({'success': False, 'error': 'MP_ACCESS_TOKEN nao configurado'}), 500
 
         data = request.json or {}
         session_id = data.get('session_id', str(uuid.uuid4()))
         base_url = get_base_url()
 
         is_test = MP_ACCESS_TOKEN.startswith("TEST-")
-        print(f"DEBUG MP: token tipo = {'TEST' if is_test else 'APP_USR'}", flush=True)
-        print(f"DEBUG MP: base_url = {base_url}", flush=True)
 
         preference_data = {
             "items": [{
@@ -223,51 +203,32 @@ def criar_pagamento():
             }],
             "back_urls": {
                 "success": base_url + "/sucesso?session=" + session_id,
-                "failure": base_url + "/erro",
-                "pending": base_url + "/pendente"
+                "failure": base_url + "/erro?session=" + session_id,
+                "pending": base_url + "/pendente?session=" + session_id
             },
             "auto_return": "approved",
             "external_reference": session_id,
             "notification_url": base_url + "/api/webhook",
-            "binary_mode": True
+            "binary_mode": False
         }
 
-        print(f"DEBUG MP: criando preference...", flush=True)
         result = sdk.preference().create(preference_data)
         status = result.get("status", 0)
         response_body = result.get("response", {}) or {}
 
-        print(f"DEBUG MP: status={status}", flush=True)
-        print(f"DEBUG MP: response={response_body}", flush=True)
-
         if status >= 400 or "id" not in response_body:
             return jsonify({
-                'success': False,
-                'error': 'Mercado Pago rejeitou a preferencia',
-                'mp_status': status,
-                'mp_message': response_body.get('message', 'sem mensagem'),
+                'success': False, 'error': 'Mercado Pago rejeitou a preferencia',
                 'mp_response': response_body
             }), 502
 
-        if is_test:
-            checkout_url = response_body.get("sandbox_init_point") or response_body.get("init_point")
-        else:
+        checkout_url = response_body.get("sandbox_init_point") if is_test else response_body.get("init_point")
+        if not checkout_url:
             checkout_url = response_body.get("init_point")
 
-        if not checkout_url:
-            return jsonify({
-                'success': False,
-                'error': 'MP nao retornou URL de checkout',
-                'mp_response': response_body
-            }), 502
-
-        print(f"DEBUG MP: checkout_url = {checkout_url}", flush=True)
-
         return jsonify({
-            'success': True,
-            'checkout_url': checkout_url,
-            'preference_id': response_body.get("id"),
-            'session_id': session_id
+            'success': True, 'checkout_url': checkout_url,
+            'preference_id': response_body.get("id"), 'session_id': session_id
         })
 
     except Exception as e:
@@ -286,7 +247,6 @@ def webhook():
             payment_info = sdk.payment().get(payment_id)
             if payment_info['response']['status'] == 'approved':
                 pagamentos_aprovados.add(payment_info['response']['external_reference'])
-                print(f"DEBUG: pagamento aprovado {payment_info['response']['external_reference']}", flush=True)
     except Exception as e:
         print(f"ERRO webhook: {e}", flush=True)
     return jsonify({'status': 'ok'})
@@ -333,11 +293,7 @@ def analise_completa():
                 media_type = 'image/jpeg'
             content.append({
                 "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": b64
-                }
+                "source": {"type": "base64", "media_type": media_type, "data": b64}
             })
 
         diag = sessao['diagnostico']
@@ -359,16 +315,219 @@ def analise_completa():
         resultado = json.loads(raw[start:end])
 
         return jsonify({
-            'success': True,
-            'diagnostico': diag,
-            'analise_completa': resultado,
-            'arroba': sessao['arroba']
+            'success': True, 'diagnostico': diag,
+            'analise_completa': resultado, 'arroba': sessao['arroba']
         })
 
     except Exception as e:
         print(f"ERRO analise_completa: {str(e)}", flush=True)
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ============================================================
+# PAGINAS DE RETORNO APOS PAGAMENTO
+# ============================================================
+
+PAGINA_BASE = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>__TITULO__</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: linear-gradient(135deg, #0a0a14 0%, #1a0a2e 100%);
+    color: #fff; min-height: 100vh; padding: 40px 20px;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  .header { text-align: center; margin-bottom: 40px; }
+  .icone { font-size: 64px; margin-bottom: 16px; }
+  h1 { font-size: 32px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.5px; }
+  .subtitulo { color: #b8b8c8; font-size: 16px; line-height: 1.5; max-width: 600px; margin: 0 auto; }
+  .card {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(192,38,211,0.25);
+    border-radius: 16px; padding: 28px; margin-bottom: 20px; backdrop-filter: blur(10px);
+  }
+  .card h2 {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 2px;
+    color: #ec4899; margin-bottom: 16px; font-weight: 600;
+  }
+  .card p, .card li { color: #e8e8f0; line-height: 1.7; font-size: 15px; }
+  .card ul { list-style: none; padding-left: 0; }
+  .card li { padding: 10px 0; padding-left: 24px; position: relative; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .card li:last-child { border-bottom: none; }
+  .card li:before { content: '→'; position: absolute; left: 0; color: #c026d3; font-weight: 700; }
+  .bio-box {
+    background: linear-gradient(135deg, rgba(192,38,211,0.15), rgba(236,72,153,0.10));
+    border: 1px solid rgba(192,38,211,0.4); border-radius: 12px; padding: 20px;
+    font-style: italic; color: #fff; line-height: 1.6;
+  }
+  .ideia { background: rgba(0,0,0,0.3); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .ideia .titulo { font-weight: 600; color: #ec4899; margin-bottom: 6px; }
+  .ideia .formato { display: inline-block; background: rgba(192,38,211,0.2); color: #f0abfc; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-bottom: 8px; }
+  .ideia .desc, .ideia .hook { color: #b8b8c8; font-size: 14px; margin-top: 4px; }
+  .ideia .hook { color: #fff; font-style: italic; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); }
+  .botao {
+    display: inline-block; background: linear-gradient(135deg, #c026d3, #ec4899);
+    color: #fff; padding: 14px 32px; border-radius: 10px; text-decoration: none;
+    font-weight: 600; font-size: 15px; border: none; cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+  .botao:hover { transform: translateY(-2px); }
+  .botao-secundario { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #b8b8c8; }
+  .loading { text-align: center; padding: 60px 20px; }
+  .spinner {
+    border: 3px solid rgba(192,38,211,0.2); border-top-color: #c026d3;
+    border-radius: 50%; width: 40px; height: 40px;
+    animation: spin 0.8s linear infinite; margin: 0 auto 20px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .erro-box { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); padding: 20px; border-radius: 12px; }
+  .footer-acoes { text-align: center; margin-top: 32px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="container">
+__CONTEUDO__
+</div>
+</body>
+</html>"""
+
+
+def render_pagina(titulo, conteudo):
+    return PAGINA_BASE.replace("__TITULO__", titulo).replace("__CONTEUDO__", conteudo)
+
+
+@app.route('/sucesso')
+def pagina_sucesso():
+    session_id = request.args.get('session', '')
+    conteudo = """
+<div class="header">
+  <div class="icone">✓</div>
+  <h1>Pagamento aprovado</h1>
+  <p class="subtitulo">Sua analise estrategica completa esta sendo carregada.</p>
+</div>
+<div id="conteudo">
+  <div class="loading">
+    <div class="spinner"></div>
+    <p class="subtitulo">Carregando sua analise...</p>
+  </div>
+</div>
+<div class="footer-acoes">
+  <a href="/" class="botao botao-secundario">Voltar ao inicio</a>
+</div>
+<script>
+const sessionId = '__SESSION__';
+async function carregar() {
+  if (!sessionId) {
+    document.getElementById('conteudo').innerHTML =
+      '<div class="card erro-box"><p>Sessao nao identificada. Volte ao site e refaca a analise.</p></div>';
+    return;
+  }
+  try {
+    const resp = await fetch('/api/analise-completa', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: sessionId})
+    });
+    const dados = await resp.json();
+    if (!dados.success) throw new Error(dados.error || 'Erro ao carregar analise');
+    renderizar(dados);
+  } catch (e) {
+    document.getElementById('conteudo').innerHTML =
+      '<div class="card erro-box"><p>Nao foi possivel carregar sua analise: ' + e.message + '</p><p style="margin-top:12px; font-size:13px;">Seu pagamento foi aprovado. Entre em contato para receber sua analise manualmente.</p></div>';
+  }
+}
+function renderizar(dados) {
+  const a = dados.analise_completa || {};
+  const ideias = (a.ideias_conteudo || []).map(i =>
+    '<div class="ideia"><div class="formato">' + (i.formato || 'Reel') + '</div>' +
+    '<div class="titulo">' + (i.titulo || '') + '</div>' +
+    '<div class="desc">' + (i.descricao || '') + '</div>' +
+    '<div class="hook">Hook: ' + (i.hook || '') + '</div></div>'
+  ).join('');
+  document.getElementById('conteudo').innerHTML =
+    '<div class="card"><h2>Nova Bio Sugerida</h2><div class="bio-box">' + (a.bio_reescrita || '') + '</div></div>' +
+    '<div class="card"><h2>Solucoes Estrategicas</h2><ul>' + (a.solucoes || []).map(s => '<li>' + s + '</li>').join('') + '</ul></div>' +
+    '<div class="card"><h2>Pilares de Conteudo</h2><ul>' + (a.pilares_conteudo || []).map(p => '<li>' + p + '</li>').join('') + '</ul></div>' +
+    '<div class="card"><h2>Ideias de Conteudo</h2>' + ideias + '</div>' +
+    '<div class="card"><h2>Plano de Acao</h2><ul>' + (a.plano_acao || []).map(p => '<li>' + p + '</li>').join('') + '</ul></div>';
+}
+carregar();
+</script>"""
+    conteudo = conteudo.replace("__SESSION__", session_id)
+    return render_pagina("Pagamento Aprovado", conteudo)
+
+
+@app.route('/pendente')
+def pagina_pendente():
+    session_id = request.args.get('session', '')
+    conteudo = """
+<div class="header">
+  <div class="icone">⏳</div>
+  <h1>Aguardando confirmacao</h1>
+  <p class="subtitulo">Seu pagamento esta sendo processado. Esta pagina vai atualizar automaticamente quando for aprovado.</p>
+</div>
+<div class="card">
+  <h2>Status</h2>
+  <p id="status">Verificando pagamento...</p>
+  <p style="margin-top:16px; font-size:13px; color:#888;">
+    Pagamentos via PIX costumam ser aprovados em segundos. Boleto pode levar ate 2 dias uteis.
+  </p>
+</div>
+<div class="footer-acoes">
+  <a href="/" class="botao botao-secundario">Voltar ao inicio</a>
+</div>
+<script>
+const sessionId = '__SESSION__';
+let tentativas = 0;
+async function verificar() {
+  tentativas++;
+  try {
+    const resp = await fetch('/api/verificar-pagamento', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: sessionId})
+    });
+    const dados = await resp.json();
+    if (dados.aprovado) {
+      document.getElementById('status').textContent = 'Pagamento aprovado! Redirecionando...';
+      setTimeout(() => window.location.href = '/sucesso?session=' + sessionId, 1500);
+    } else {
+      document.getElementById('status').textContent = 'Aguardando... (verificacao ' + tentativas + ')';
+      if (tentativas < 60) setTimeout(verificar, 5000);
+      else document.getElementById('status').textContent = 'Aguardando ha muito tempo. Voce pode fechar esta pagina e voltar depois.';
+    }
+  } catch (e) {
+    document.getElementById('status').textContent = 'Erro ao verificar. Tentando novamente...';
+    if (tentativas < 60) setTimeout(verificar, 5000);
+  }
+}
+if (sessionId) verificar();
+else document.getElementById('status').textContent = 'Sessao nao identificada.';
+</script>"""
+    conteudo = conteudo.replace("__SESSION__", session_id)
+    return render_pagina("Pagamento Pendente", conteudo)
+
+
+@app.route('/erro')
+def pagina_erro():
+    conteudo = """
+<div class="header">
+  <div class="icone">⚠</div>
+  <h1>Pagamento nao aprovado</h1>
+  <p class="subtitulo">Algo deu errado com seu pagamento. Voce pode tentar novamente com outro meio.</p>
+</div>
+<div class="card erro-box">
+  <p>Possiveis motivos: cartao recusado, saldo insuficiente, dados incorretos, ou tempo expirado.</p>
+</div>
+<div class="footer-acoes">
+  <a href="/" class="botao">Tentar novamente</a>
+</div>"""
+    return render_pagina("Pagamento nao aprovado", conteudo)
 
 
 if __name__ == '__main__':
