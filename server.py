@@ -108,17 +108,9 @@ Gere o diagnóstico estratégico focado apenas nos problemas."""
 
         raw = response.content[0].text
         clean = raw.replace('```json', '').replace('```', '').strip()
-    try:
-            analyse=json.loads(clean)
-    except Exception as e:
-            print("ERRO JSON:", clean)
-            return jsonify({
-        
-
-        "erro": "Resposta inválida da IA",
-        "detalhe": str(e),
-        "resposta": clean
-    }), 500
+    raw = response.content[0].text
+clean = raw.replace("json", "").replace("", "").strip()
+analyse = json.loads(clean)
 
         # Gera ID único para essa sessão
         session_id = str(uuid.uuid4())
