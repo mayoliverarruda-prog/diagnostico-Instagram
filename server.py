@@ -100,7 +100,7 @@ Gere o diagnóstico estratégico focado apenas nos problemas."""
         })
 
         response = client.messages.create(
-            model="claude-3-7-sonnet-latest",
+           model="claude-3-5-sonnet-20241022",
             max_tokens=1000,
             system=SYSTEM_DIAGNOSTICO,
             messages=[{"role": "user", "content": content}]
@@ -246,7 +246,7 @@ Agora gere a análise COMPLETA com soluções, bio reescrita, ideias de conteúd
         })
 
         response = client.messages.create(
-            model="claude-3-7-sonnet-latest",
+           model="claude-3-5-sonnet-20241022",
             max_tokens=1000,
             system=SYSTEM_COMPLETO,
             messages=[{"role": "user", "content": content}]
