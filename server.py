@@ -38,6 +38,9 @@ def gerar_diagnostico():
         obs = data.get('obs', '')
         imagens = data.get('imagens', [])
 
+        print(f"DEBUG: arroba={arroba}, nicho={nicho}", flush=True)
+        print(f"DEBUG: ANTHROPIC_API_KEY presente: {bool(ANTHROPIC_API_KEY)}", flush=True)
+
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         content = []
 
@@ -50,17 +53,15 @@ def gerar_diagnostico():
                 media_type = 'image/jpeg'
             content.append({
                 "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": b64
-                }
+                "source": {"type": "base64", "media_type": media_type, "data": b64}
             })
 
         content.append({
             "type": "text",
             "text": "Perfil: " + arroba + "\nNicho: " + nicho + "\nSeguidores: " + seguidores + "\nObjetivo: " + objetivo + "\nGere o diagnostico."
         })
+
+        print("DEBUG: chamando Anthropic API...", flush=True)
 
         response = client.messages.create(
             model="claude-3-5-sonnet-20241022",
@@ -69,25 +70,27 @@ def gerar_diagnostico():
             messages=[{"role": "user", "content": content}]
         )
 
+        print(f"DEBUG: resposta recebida: {response.content[0].text[:200]}", flush=True)
+
         raw = response.content[0].text.strip()
         start = raw.find('{')
         end = raw.rfind('}') + 1
         analise = json.loads(raw[start:end])
 
+        print("DEBUG: JSON parsed com sucesso", flush=True)
+
         session_id = str(uuid.uuid4())
         analises_cache[session_id] = {
-            'arroba': arroba,
-            'nicho': nicho,
-            'seguidores': seguidores,
-            'objetivo': objetivo,
-            'obs': obs,
-            'imagens': imagens,
-            'diagnostico': analise
+            'arroba': arroba, 'nicho': nicho, 'seguidores': seguidores,
+            'objetivo': objetivo, 'obs': obs, 'imagens': imagens, 'diagnostico': analise
         }
 
         return jsonify({'success': True, 'analise': analise, 'session_id': session_id})
 
     except Exception as e:
+        print(f"ERRO DETALHADO: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
