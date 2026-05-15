@@ -9,7 +9,9 @@ import uuid
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
-
+@app.route("/")
+def home():
+    return app.send_static_file("index.html")
 # Credenciais
 MP_ACCESS_TOKEN = "APP_USR-5014720075912185-051421-1751eba1b3378583136757a507872f74-3403743588"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
