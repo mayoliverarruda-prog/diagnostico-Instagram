@@ -168,7 +168,7 @@ def analise_completa():
         content.append({"type": "text", "text": f"Perfil: {sessao['arroba']}\nNicho: {sessao['nicho']}\nProblemas: {', '.join(diag['problemas'])}\nGere a analise completa com solucoes."})
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-20250514"
             max_tokens=1000,
             system=SYSTEM_COMPLETO,
             messages=[{"role": "user", "content": content}]
