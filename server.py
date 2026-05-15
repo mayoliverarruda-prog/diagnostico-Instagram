@@ -15,7 +15,9 @@ def home():
 # Credenciais
 MP_ACCESS_TOKEN = "APP_USR-5014720075912185-051421-1751eba1b3378583136757a507872f74-3403743588"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-
+client = anthropic.Anthropic(
+    api_key=ANTHROPIC_API_KEY
+)
 sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
 
 # Storage simples em memória (em produção usar banco de dados)
