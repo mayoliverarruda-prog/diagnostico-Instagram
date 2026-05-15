@@ -98,7 +98,7 @@ Gere o diagnóstico estratégico focado apenas nos problemas."""
         })
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-7-sonnet-latest",
             max_tokens=1000,
             system=SYSTEM_DIAGNOSTICO,
             messages=[{"role": "user", "content": content}]
