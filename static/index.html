@@ -1,1 +1,493 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagnóstico de Perfil Instagram — Mayara Arruda</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0A0414; --surface: #120820; --surface2: #1a0d2e;
+  --border: #2a1545; --accent: #B026FF; --accent2: #FF29C0;
+  --text: #F5F3FF; --muted: #7b6a9a;
+}
+body { background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; min-height: 100vh; }
+body::after {
+  content: ''; position: fixed; top: -150px; left: 50%; transform: translateX(-50%);
+  width: 600px; height: 400px;
+  background: radial-gradient(ellipse, rgba(176,38,255,.18) 0%, transparent 70%);
+  pointer-events: none; z-index: 0;
+}
+.wrap { position: relative; z-index: 1; max-width: 780px; margin: 0 auto; padding: 48px 20px 80px; }
+header { text-align: center; margin-bottom: 44px; }
+.logo { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+.logo-icon {
+  width: 42px; height: 42px; border-radius: 10px;
+  background: linear-gradient(135deg, #B026FF, #FF29C0);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Playfair Display', serif; font-weight: 900; font-size: 16px; color: #fff;
+  box-shadow: 0 0 24px rgba(176,38,255,.5);
+}
+.logo-name { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
+.badge {
+  display: inline-block; font-size: 10px; font-weight: 600; letter-spacing: 3px;
+  text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent);
+  padding: 4px 12px; border-radius: 2px; margin-bottom: 20px;
+}
+h1 { font-family: 'Playfair Display', serif; font-size: clamp(32px,5vw,54px); font-weight: 900; line-height: 1.05; }
+h1 em { font-style: italic; color: var(--accent); }
+.subtitle { margin-top: 12px; color: var(--muted); font-size: 14px; max-width: 420px; margin-left: auto; margin-right: auto; line-height: 1.7; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 32px; margin-bottom: 16px; }
+label { display: block; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
+input, textarea, select {
+  width: 100%; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 16px; color: var(--text);
+  font-family: 'Syne', sans-serif; font-size: 14px; outline: none; transition: border-color .2s; resize: none;
+}
+input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--muted); }
+select option { background: #120820; }
+.field { margin-bottom: 18px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media(max-width:560px) { .row2 { grid-template-columns: 1fr; } }
+.upload-area {
+  border: 2px dashed var(--border); border-radius: 10px; padding: 28px;
+  text-align: center; cursor: pointer; transition: border-color .2s; position: relative;
+}
+.upload-area:hover { border-color: var(--accent); }
+.upload-area input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.upload-icon { font-size: 28px; margin-bottom: 8px; }
+.upload-text { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.upload-text strong { color: var(--accent); }
+.preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; margin-top: 14px; }
+.preview-img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
+.btn {
+  width: 100%; padding: 18px;
+  background: linear-gradient(135deg, #B026FF, #FF29C0);
+  border: none; border-radius: 10px; color: #fff;
+  font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 800;
+  cursor: pointer; letter-spacing: .5px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  transition: opacity .2s, transform .15s;
+}
+.btn:hover { transform: translateY(-2px); }
+.btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+.btn-outline {
+  width: 100%; padding: 18px; background: transparent;
+  border: 2px solid var(--accent); border-radius: 10px; color: var(--accent);
+  font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 800;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px;
+  transition: background .2s;
+}
+.btn-outline:hover { background: rgba(176,38,255,.1); }
+#loading { display: none; text-align: center; padding: 60px 20px; }
+.spinner {
+  width: 44px; height: 44px; border: 3px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 1s linear infinite; margin: 0 auto 20px;
+}
+.loading-msg { color: var(--muted); font-size: 14px; animation: pulse 2s ease infinite; }
+#diagnostico { display: none; }
+#oferta { display: none; }
+#analise-completa { display: none; }
+.section-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; font-weight: 600; }
+.problema-item {
+  background: var(--surface2); border-left: 2px solid var(--accent2);
+  border-radius: 0 8px 8px 0; padding: 14px 16px; margin-bottom: 10px;
+  font-size: 14px; color: #c9cdd4; line-height: 1.7;
+}
+.solucao-item {
+  background: var(--surface2); border-left: 2px solid var(--accent);
+  border-radius: 0 8px 8px 0; padding: 14px 16px; margin-bottom: 10px;
+  font-size: 14px; color: #c9cdd4; line-height: 1.7;
+}
+.ideia-card {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 18px; margin-bottom: 12px;
+}
+.ideia-card h4 { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+.ideia-card p { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 8px; }
+.ideia-card .hook { font-size: 13px; color: #F5F3FF; font-style: italic; border-left: 2px solid var(--accent); padding-left: 10px; margin-top: 8px; }
+.format-tag {
+  display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+  text-transform: uppercase; padding: 2px 10px; border-radius: 4px; margin-bottom: 8px;
+}
+.ft-reel { background: rgba(176,38,255,.15); color: #B026FF; border: 1px solid rgba(176,38,255,.3); }
+.ft-carrossel { background: rgba(255,41,192,.15); color: #FF29C0; border: 1px solid rgba(255,41,192,.3); }
+.ft-story { background: rgba(180,170,215,.15); color: #B4AAD7; border: 1px solid rgba(180,170,215,.3); }
 
+/* OFERTA */
+.oferta-box {
+  background: linear-gradient(135deg, rgba(176,38,255,.15), rgba(255,41,192,.1));
+  border: 1px solid rgba(176,38,255,.4); border-radius: 14px; padding: 32px; text-align: center;
+}
+.oferta-preco {
+  font-family: 'Playfair Display', serif; font-size: 56px; font-weight: 900;
+  color: var(--accent); line-height: 1;
+}
+.oferta-lista { text-align: left; margin: 24px 0; }
+.oferta-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+  font-size: 14px; color: #c9cdd4; line-height: 1.5;
+}
+.oferta-item:last-child { border-bottom: none; }
+.oferta-check { color: var(--accent); font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+
+#error { display: none; background: rgba(245,66,66,.08); border: 1px solid rgba(245,66,66,.2); border-radius: 10px; padding: 16px; color: #f54242; font-size: 13px; text-align: center; margin-top: 16px; }
+
+.footer-brand { text-align: center; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+@keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+.fade { animation: fadeUp .5s ease forwards; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">
+      <div class="logo-icon">MA</div>
+      <span class="logo-name">Mayara Arruda</span>
+    </div>
+    <div class="badge">Diagnóstico Gratuito de Perfil</div>
+    <h1>Descubra o que está<br><em>travando</em> seu Instagram</h1>
+    <p class="subtitle">Preencha os dados do seu perfil. A IA analisa e mostra gratuitamente o que está impedindo seu crescimento.</p>
+  </header>
+
+  <!-- FORM -->
+  <div id="formSection">
+    <div class="card">
+      <div class="row2">
+        <div class="field">
+          <label>@ do seu perfil</label>
+          <input type="text" id="arroba" placeholder="@seuperfil">
+        </div>
+        <div class="field">
+          <label>Nicho / Segmento</label>
+          <input type="text" id="nicho" placeholder="Ex: loja de cosméticos">
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>Número de seguidores</label>
+          <input type="text" id="seguidores" placeholder="Ex: 2.000">
+        </div>
+        <div class="field">
+          <label>Objetivo do perfil</label>
+          <select id="objetivo">
+            <option value="vendas">Gerar vendas</option>
+            <option value="autoridade">Construir autoridade</option>
+            <option value="crescimento">Crescer seguidores</option>
+            <option value="marca_pessoal">Marca pessoal</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Observações (opcional)</label>
+        <textarea id="obs" rows="2" placeholder="Ex: perfil novo, público feminino 25-40 anos..."></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <label>Prints do seu perfil (bio, feed, stories)</label>
+      <div class="upload-area">
+        <input type="file" id="fileInput" accept="image/*" multiple onchange="handleFiles(this.files)">
+        <div class="upload-icon">📸</div>
+        <div class="upload-text"><strong>Toque para enviar os prints</strong><br>Bio, feed, stories — até 5 imagens</div>
+      </div>
+      <div class="preview-grid" id="previewGrid"></div>
+    </div>
+
+    <button class="btn" id="gerarBtn" onclick="gerarDiagnostico()">
+      <span>🔍</span> Ver Diagnóstico Gratuito
+    </button>
+    <div id="error"></div>
+  </div>
+
+  <!-- LOADING -->
+  <div id="loading">
+    <div class="spinner"></div>
+    <p class="loading-msg" id="loadingMsg">Analisando seu perfil com inteligência artificial...</p>
+  </div>
+
+  <!-- DIAGNÓSTICO -->
+  <div id="diagnostico">
+    <div class="card fade">
+      <div class="section-label">📋 Primeira percepção do perfil</div>
+      <p id="percepcao" style="font-size:15px;line-height:1.8;color:#c9cdd4"></p>
+    </div>
+    <div class="card fade">
+      <div class="section-label">⚠️ Problemas estratégicos encontrados</div>
+      <div id="problemas"></div>
+    </div>
+    <div class="card fade" style="border-color:rgba(255,41,192,.25);background:rgba(255,41,192,.04)">
+      <div class="section-label">💸 O que isso está custando</div>
+      <p id="impacto" style="font-size:14px;line-height:1.8;color:#c9cdd4"></p>
+    </div>
+    <div class="card fade" style="border-color:rgba(176,38,255,.3);background:rgba(176,38,255,.06)">
+      <div class="section-label">🎯 Diagnóstico final</div>
+      <p id="gancho" style="font-family:'Playfair Display',serif;font-size:18px;line-height:1.6;font-style:italic"></p>
+    </div>
+  </div>
+
+  <!-- OFERTA -->
+  <div id="oferta">
+    <div class="oferta-box fade" style="margin-bottom:16px">
+      <p style="font-size:13px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:2px">Quer resolver esses problemas?</p>
+      <h2 style="font-family:'Playfair Display',serif;font-size:28px;margin-bottom:16px">Análise Estratégica Completa</h2>
+      
+      <div class="oferta-lista">
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Bio reescrita</strong> — nova bio pronta para usar, que posiciona e converte</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Soluções para cada problema</strong> encontrado no diagnóstico</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>3 pilares de conteúdo</strong> personalizados para o seu nicho</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>6 ideias de conteúdo prontas</strong> com formato, descrição e hook</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Plano de ação para 7 dias</strong> — o que fazer primeiro</span></div>
+      </div>
+
+      <div class="oferta-preco">R$19,90</div>
+      <p style="color:var(--muted);font-size:12px;margin:8px 0 24px">pagamento único • resultado em segundos</p>
+
+      <button class="btn" onclick="comprar()">
+        <span>⚡</span> Quero a Análise Completa
+      </button>
+    </div>
+  </div>
+
+  <!-- ANÁLISE COMPLETA -->
+  <div id="analise-completa">
+    <div class="card fade" style="border-color:rgba(176,38,255,.3)">
+      <div class="section-label">✅ Pagamento confirmado!</div>
+      <p style="font-size:14px;color:#c9cdd4">Sua análise completa está pronta abaixo.</p>
+    </div>
+
+    <div class="card fade">
+      <div class="section-label">📝 Nova bio sugerida</div>
+      <div id="bio-reescrita" style="background:var(--surface2);border-left:3px solid var(--accent);padding:16px;border-radius:0 8px 8px 0;font-size:14px;line-height:1.8;color:#F5F3FF"></div>
+    </div>
+
+    <div class="card fade">
+      <div class="section-label">💡 Soluções para cada problema</div>
+      <div id="solucoes"></div>
+    </div>
+
+    <div class="card fade">
+      <div class="section-label">🎯 6 Ideias de conteúdo prontas</div>
+      <div id="ideias"></div>
+    </div>
+
+    <div class="card fade">
+      <div class="section-label">📅 Plano de ação — próximos 7 dias</div>
+      <div id="plano"></div>
+    </div>
+
+    <div class="footer-brand">
+      <div style="display:inline-flex;align-items:center;gap:8px;margin-bottom:6px">
+        <div style="width:28px;height:28px;border-radius:7px;background:linear-gradient(135deg,#B026FF,#FF29C0);display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-weight:900;font-size:11px;color:#fff">MA</div>
+        <span style="font-size:13px;color:var(--muted);font-weight:600;letter-spacing:1px">Mayara Arruda</span>
+      </div>
+      <p style="font-size:11px;color:#3d2e55">Estratégia de Conteúdo para Instagram</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API_BASE = window.location.origin;
+let uploadedImages = [];
+let sessionId = null;
+
+// Verifica se voltou de pagamento aprovado
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(window.location.search);
+  const session = params.get('session');
+  const paymentId = params.get('payment_id');
+  const status = params.get('status') || params.get('collection_status');
+
+  if (session && (status === 'approved' || paymentId)) {
+    sessionId = session;
+    carregarAnaliseCompleta(session, paymentId);
+  }
+});
+
+function handleFiles(files) {
+  const grid = document.getElementById('previewGrid');
+  grid.innerHTML = '';
+  uploadedImages = [];
+  Array.from(files).slice(0, 5).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      uploadedImages.push(e.target.result);
+      const img = document.createElement('img');
+      img.src = e.target.result;
+      img.className = 'preview-img';
+      grid.appendChild(img);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function gerarDiagnostico() {
+  const arroba = document.getElementById('arroba').value.trim();
+  const nicho = document.getElementById('nicho').value.trim();
+  if (!arroba || !nicho) {
+    mostrarErro('Preencha pelo menos o @ e o nicho do perfil.');
+    return;
+  }
+
+  document.getElementById('formSection').style.display = 'none';
+  document.getElementById('error').style.display = 'none';
+  document.getElementById('loading').style.display = 'block';
+
+  try {
+    const res = await fetch(`${API_BASE}/api/diagnostico`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        arroba, nicho,
+        seguidores: document.getElementById('seguidores').value,
+        objetivo: document.getElementById('objetivo').value,
+        obs: document.getElementById('obs').value,
+        imagens: uploadedImages
+      })
+    });
+
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+
+    sessionId = data.session_id;
+    renderDiagnostico(data.analise);
+
+  } catch (e) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('formSection').style.display = 'block';
+    mostrarErro('Erro ao gerar diagnóstico. Tente novamente.');
+  }
+}
+
+function renderDiagnostico(a) {
+  document.getElementById('loading').style.display = 'none';
+
+  document.getElementById('percepcao').textContent = a.percepcao_inicial;
+  document.getElementById('impacto').textContent = a.impacto;
+  document.getElementById('gancho').textContent = `"${a.frase_gancho}"`;
+
+  const probDiv = document.getElementById('problemas');
+  probDiv.innerHTML = a.problemas.map((p, i) => `
+    <div class="problema-item">
+      <strong style="color:#FF29C0">Problema ${i+1}:</strong> ${p}
+    </div>
+  `).join('');
+
+  document.getElementById('diagnostico').style.display = 'block';
+  document.getElementById('oferta').style.display = 'block';
+  document.getElementById('diagnostico').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function comprar() {
+  try {
+    const res = await fetch(`${API_BASE}/api/criar-pagamento`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    const data = await res.json();
+    if (data.success) {
+      window.location.href = data.checkout_url;
+    }
+  } catch (e) {
+    alert('Erro ao abrir checkout. Tente novamente.');
+  }
+}
+
+async function carregarAnaliseCompleta(session, paymentId) {
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('loadingMsg').textContent = 'Confirmando pagamento e gerando análise completa...';
+
+  // Verifica pagamento
+  const verif = await fetch(`${API_BASE}/api/verificar-pagamento`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: session, payment_id: paymentId })
+  });
+  const verifData = await verif.json();
+
+  if (!verifData.aprovado) {
+    document.getElementById('loading').style.display = 'none';
+    mostrarErro('Pagamento não confirmado. Se você pagou, aguarde alguns segundos e recarregue a página.');
+    return;
+  }
+
+  // Busca análise completa
+  const res = await fetch(`${API_BASE}/api/analise-completa`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: verifData.session_id || session })
+  });
+  const data = await res.json();
+
+  if (!data.success) {
+    document.getElementById('loading').style.display = 'none';
+    mostrarErro('Erro ao carregar análise. Entre em contato: @mayaraarruda01');
+    return;
+  }
+
+  document.getElementById('loading').style.display = 'none';
+  renderAnaliseCompleta(data);
+}
+
+function renderAnaliseCompleta(data) {
+  const d = data.diagnostico;
+  const a = data.analise_completa;
+
+  // Mostra diagnóstico
+  document.getElementById('percepcao').textContent = d.percepcao_inicial;
+  document.getElementById('impacto').textContent = d.impacto;
+  document.getElementById('gancho').textContent = `"${d.frase_gancho}"`;
+  document.getElementById('problemas').innerHTML = d.problemas.map((p, i) => `
+    <div class="problema-item"><strong style="color:#FF29C0">Problema ${i+1}:</strong> ${p}</div>
+  `).join('');
+  document.getElementById('diagnostico').style.display = 'block';
+
+  // Bio
+  document.getElementById('bio-reescrita').textContent = a.bio_reescrita;
+
+  // Soluções
+  document.getElementById('solucoes').innerHTML = a.solucoes.map((s, i) => `
+    <div class="solucao-item"><strong style="color:#B026FF">Solução ${i+1}:</strong> ${s}</div>
+  `).join('');
+
+  // Ideias
+  const formatTag = (f) => {
+    const map = { 'Reel': 'ft-reel', 'Carrossel': 'ft-carrossel', 'Story': 'ft-story' };
+    return `<span class="format-tag ${map[f] || 'ft-reel'}">${f}</span>`;
+  };
+  document.getElementById('ideias').innerHTML = a.ideias_conteudo.map((id, i) => `
+    <div class="ideia-card">
+      ${formatTag(id.formato)}
+      <h4>0${i+1}. ${id.titulo}</h4>
+      <p>${id.descricao}</p>
+      <div class="hook">"${id.hook}"</div>
+    </div>
+  `).join('');
+
+  // Plano
+  document.getElementById('plano').innerHTML = a.plano_acao.map((p, i) => `
+    <div class="solucao-item"><strong style="color:#B026FF">Dia ${(i+1)*2-1}-${(i+1)*2}:</strong> ${p}</div>
+  `).join('');
+
+  document.getElementById('analise-completa').style.display = 'block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function mostrarErro(msg) {
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+</script>
+</body>
+</html>
