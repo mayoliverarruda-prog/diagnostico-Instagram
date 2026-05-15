@@ -106,11 +106,9 @@ Gere o diagnóstico estratégico focado apenas nos problemas."""
             messages=[{"role": "user", "content": content}]
         )
 
-        raw = response.content[0].text
-        clean = raw.replace('```json', '').replace('```', '').strip()
-    raw = response.content[0].text
-clean = raw.replace("json", "").replace("", "").strip()
-analyse = json.loads(clean)
+      raw = response.content[0].text
+clean = raw.replace('```json', '').replace('```', '').strip()
+analise = json.loads(clean)
 
         # Gera ID único para essa sessão
         session_id = str(uuid.uuid4())
