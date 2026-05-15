@@ -244,7 +244,7 @@ Agora gere a análise COMPLETA com soluções, bio reescrita, ideias de conteúd
         })
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-7-sonnet-latest",
             max_tokens=1000,
             system=SYSTEM_COMPLETO,
             messages=[{"role": "user", "content": content}]
