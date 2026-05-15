@@ -108,11 +108,13 @@ Gere o diagnóstico estratégico focado apenas nos problemas."""
 
         raw = response.content[0].text
         clean = raw.replace('```json', '').replace('```', '').strip()
-        try:
-            analyse = json.loads(clean)
-except Exception as e:
-    print("ERRO JSON:", clean)
-    return jsonify({
+    try:
+            analyse=json.loads(clean)
+    except Exception as e:
+            print("ERRO JSON:", clean)
+            return jsonify({
+        
+
         "erro": "Resposta inválida da IA",
         "detalhe": str(e),
         "resposta": clean
