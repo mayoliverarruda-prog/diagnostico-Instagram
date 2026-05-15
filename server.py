@@ -5,14 +5,19 @@ import anthropic
 import json
 import os
 import uuid
+import traceback
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
-MP_ACCESS_TOKEN = "APP_USR-5014720075912185-051421-1751eba1b3378583136757a507872f74-3403743588"
+# Le tokens do Railway (Variables) - NUNCA mais no codigo
+MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
-sdk = mercadopago.SDK(MP_ACCESS_TOKEN)
+print(f"DEBUG INICIAL: MP_ACCESS_TOKEN presente: {bool(MP_ACCESS_TOKEN)}", flush=True)
+print(f"DEBUG INICIAL: ANTHROPIC_API_KEY presente: {bool(ANTHROPIC_API_KEY)}", flush=True)
+
+sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 
 pagamentos_aprovados = set()
 analises_cache = {}
@@ -89,7 +94,6 @@ def gerar_diagnostico():
 
     except Exception as e:
         print(f"ERRO DETALHADO: {str(e)}", flush=True)
-        import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -97,9 +101,22 @@ def gerar_diagnostico():
 @app.route('/api/criar-pagamento', methods=['POST'])
 def criar_pagamento():
     try:
-        data = request.json
-        session_id = data.get('session_id')
+        # Verifica se token existe
+        if not MP_ACCESS_TOKEN or not sdk:
+            print("ERRO: MP_ACCESS_TOKEN nao configurado no Railway", flush=True)
+            return jsonify({
+                'success': False,
+                'error': 'MP_ACCESS_TOKEN nao configurado no servidor'
+            }), 500
+
+        data = request.json or {}
+        session_id = data.get('session_id', str(uuid.uuid4()))
         base_url = request.host_url.rstrip('/')
+
+        # Detecta se token e de teste ou producao
+        is_test = MP_ACCESS_TOKEN.startswith("TEST-")
+        print(f"DEBUG MP: token tipo = {'TEST' if is_test else 'APP_USR'}", flush=True)
+        print(f"DEBUG MP: base_url = {base_url}", flush=True)
 
         preference_data = {
             "items": [{
@@ -115,16 +132,54 @@ def criar_pagamento():
             },
             "auto_return": "approved",
             "external_reference": session_id,
-            "notification_url": base_url + "/api/webhook"
+            "notification_url": base_url + "/api/webhook",
+            "binary_mode": True
         }
 
-        preference = sdk.preference().create(preference_data)
+        print(f"DEBUG MP: criando preference...", flush=True)
+        result = sdk.preference().create(preference_data)
+        status = result.get("status", 0)
+        response_body = result.get("response", {}) or {}
+
+        print(f"DEBUG MP: status={status}", flush=True)
+        print(f"DEBUG MP: response={response_body}", flush=True)
+
+        # Se MP retornou erro, mostra qual foi
+        if status >= 400 or "id" not in response_body:
+            return jsonify({
+                'success': False,
+                'error': 'Mercado Pago rejeitou a preferencia',
+                'mp_status': status,
+                'mp_message': response_body.get('message', 'sem mensagem'),
+                'mp_response': response_body
+            }), 502
+
+        # Tokens TEST- antigos usam sandbox_init_point
+        # Tokens APP_USR- (tanto teste quanto producao) usam init_point
+        if is_test:
+            checkout_url = response_body.get("sandbox_init_point") or response_body.get("init_point")
+        else:
+            checkout_url = response_body.get("init_point")
+
+        if not checkout_url:
+            return jsonify({
+                'success': False,
+                'error': 'MP nao retornou URL de checkout',
+                'mp_response': response_body
+            }), 502
+
+        print(f"DEBUG MP: checkout_url = {checkout_url}", flush=True)
+
         return jsonify({
             'success': True,
-            'checkout_url': preference["response"]["sandbox_init_point"]
+            'checkout_url': checkout_url,
+            'preference_id': response_body.get("id"),
+            'session_id': session_id
         })
 
     except Exception as e:
+        print(f"ERRO criar_pagamento: {str(e)}", flush=True)
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -132,13 +187,15 @@ def criar_pagamento():
 def webhook():
     try:
         data = request.json
+        print(f"DEBUG WEBHOOK: {data}", flush=True)
         if data and data.get('type') == 'payment':
             payment_id = data['data']['id']
             payment_info = sdk.payment().get(payment_id)
             if payment_info['response']['status'] == 'approved':
                 pagamentos_aprovados.add(payment_info['response']['external_reference'])
-    except Exception:
-        pass
+                print(f"DEBUG: pagamento aprovado {payment_info['response']['external_reference']}", flush=True)
+    except Exception as e:
+        print(f"ERRO webhook: {e}", flush=True)
     return jsonify({'status': 'ok'})
 
 
@@ -148,7 +205,7 @@ def verificar_pagamento():
     session_id = data.get('session_id')
     payment_id = data.get('payment_id')
 
-    if payment_id:
+    if payment_id and sdk:
         try:
             payment_info = sdk.payment().get(payment_id)
             if payment_info['response']['status'] == 'approved':
@@ -197,8 +254,8 @@ def analise_completa():
         })
 
         response = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=1000,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
             system=SYSTEM_COMPLETO,
             messages=[{"role": "user", "content": content}]
         )
@@ -216,6 +273,8 @@ def analise_completa():
         })
 
     except Exception as e:
+        print(f"ERRO analise_completa: {str(e)}", flush=True)
+        traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
