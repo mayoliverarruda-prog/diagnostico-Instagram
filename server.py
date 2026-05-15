@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+from datetime import datetime
 import mercadopago
 import anthropic
 import json
@@ -10,7 +11,6 @@ import traceback
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
-# Le tokens do Railway (Variables) - NUNCA mais no codigo
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
@@ -22,11 +22,97 @@ sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 pagamentos_aprovados = set()
 analises_cache = {}
 
-SYSTEM_DIAGNOSTICO = """Voce e uma estrategista de conteudo especialista em Instagram. Analise o perfil e gere um diagnostico HONESTO focado apenas nos PROBLEMAS sem solucoes. Seja direta, especifica e cirurgica. Nao use linguagem de coach. Responda APENAS com JSON valido sem markdown sem backticks: {"percepcao_inicial": "como um visitante ve o perfil nos primeiros 3 segundos", "problemas": ["problema 1", "problema 2", "problema 3", "problema 4", "problema 5"], "impacto": "o que esses problemas estao custando ao perfil", "frase_gancho": "frase curta e impactante sobre o estado atual"}"""
+# ============================================================
+# CONTROLE DE LIMITE GRATUITO POR IP
+# ============================================================
+LIMITE_DIARIO = 2
+# Estrutura: { "ip": { "data": "2026-05-15", "count": 1 } }
+usos_por_ip = {}
 
-SYSTEM_COMPLETO = """Voce e uma estrategista de conteudo especialista em Instagram. Gere a ANALISE COMPLETA com solucoes, estrategia e ideias de conteudo. Responda APENAS com JSON valido sem markdown sem backticks: {"bio_reescrita": "nova bio sugerida", "solucoes": ["solucao 1", "solucao 2", "solucao 3", "solucao 4", "solucao 5"], "pilares_conteudo": ["pilar 1", "pilar 2", "pilar 3"], "ideias_conteudo": [{"titulo": "titulo", "formato": "Reel", "descricao": "descricao", "hook": "hook"}], "plano_acao": ["acao 1", "acao 2", "acao 3"]}"""
+
+def get_client_ip():
+    """Pega IP real do usuario (Railway usa proxy, IP vem em X-Forwarded-For)."""
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or 'desconhecido'
 
 
+def verifica_limite_grauito(ip):
+    """Retorna True se o IP ainda pode fazer analise gratuita."""
+    hoje = datetime.utcnow().strftime('%Y-%m-%d')
+    registro = usos_por_ip.get(ip)
+    if not registro or registro.get('data') != hoje:
+        return True
+    return registro.get('count', 0) < LIMITE_DIARIO
+
+
+def registra_uso_gratuito(ip):
+    """Incrementa contador do IP no dia atual."""
+    hoje = datetime.utcnow().strftime('%Y-%m-%d')
+    registro = usos_por_ip.get(ip)
+    if not registro or registro.get('data') != hoje:
+        usos_por_ip[ip] = {'data': hoje, 'count': 1}
+    else:
+        usos_por_ip[ip]['count'] = registro.get('count', 0) + 1
+
+
+# ============================================================
+# PROMPTS
+# ============================================================
+SYSTEM_DIAGNOSTICO = """Voce e uma consultora estrategica senior de Instagram, com perfil de analista de marca. Tom: premium, profissional, consultivo, inteligente. NUNCA agressivo, sarcastico, humilhante ou destrutivo.
+
+OBJETIVO: gerar percepcao estrategica HONESTA que faca a pessoa pensar "faz sentido, e isso mesmo que meu perfil transmite". Despertar curiosidade pela analise completa, SEM entregar solucao detalhada agora.
+
+REGRAS DE LINGUAGEM:
+- Reconheca pontos positivos reais antes de apontar pontos de melhoria
+- Aponte problemas como "oportunidades estrategicas" ou "pontos que limitam o crescimento"
+- Use linguagem consultiva: "observei que", "o perfil ainda nao comunica", "ha espaco para fortalecer"
+- Tom analitico, nao emocional
+- Frases construtivas, nunca absolutas
+
+PROIBIDO usar palavras ou expressoes como:
+- "caotico", "caos", "bagunca"
+- "destruindo", "matando", "afundando"
+- "ninguem entende", "ninguem ve", "ninguem segue"
+- "inconsistencia total", "totalmente desorganizado"
+- "fracasso", "perdido", "errado"
+- Linguagem de coach motivacional
+- Frases absolutas tipo "voce nunca vai crescer"
+
+ESTRUTURA OBRIGATORIA:
+1. percepcao_inicial: como um visitante estrategico le o perfil nos primeiros 3 segundos (1-2 frases, tom neutro e profissional)
+2. pontos_fortes: 2 pontos positivos REAIS que voce observou no perfil (curtos, especificos)
+3. problemas: 3 pontos de melhoria estrategicos, descritos como oportunidades (curtos, especificos, NAO da solucao)
+4. impacto: o que esses pontos estao impedindo o perfil de alcancar (1 paragrafo, tom analitico, sem drama)
+5. frase_gancho: uma frase curta que cria curiosidade pela analise completa, SEM ameacar. Exemplo de bom tom: "O perfil tem fundacao, mas ainda nao comunica posicionamento de forma clara. A analise completa mostra exatamente o que ajustar."
+
+NAO entregue solucoes nesta versao. Apenas diagnostico estrategico.
+
+Responda APENAS com JSON valido sem markdown sem backticks:
+{"percepcao_inicial": "...", "pontos_fortes": ["...", "..."], "problemas": ["...", "...", "..."], "impacto": "...", "frase_gancho": "..."}"""
+
+
+SYSTEM_COMPLETO = """Voce e uma consultora estrategica senior de Instagram. Agora entregue a ANALISE COMPLETA com solucoes praticas, estrategia clara e ideias de conteudo aplicaveis. Tom: profissional, consultivo, premium, construtivo. Sem linguagem de coach.
+
+Responda APENAS com JSON valido sem markdown sem backticks: {"bio_reescrita": "nova bio sugerida", "solucoes": ["solucao 1", "solucao 2", "solucao 3", "solucao 4", "solucao 5"], "pilares_conteudo": ["pilar 1", "pilar 2", "pilar 3"], "ideias_conteudo": [{"titulo": "titulo", "formato": "Reel", "descricao": "descricao", "hook": "hook"}], "plano_acao": ["acao 1", "acao 2", "acao 3"]}"""
+
+
+# ============================================================
+# UTILS
+# ============================================================
+def get_base_url():
+    """URL base sempre com https (Railway usa proxy http internamente)."""
+    proto = request.headers.get('X-Forwarded-Proto', 'https')
+    host = request.headers.get('X-Forwarded-Host') or request.host
+    if proto != 'https':
+        proto = 'https'
+    return f"{proto}://{host}"
+
+
+# ============================================================
+# ROTAS
+# ============================================================
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
@@ -35,6 +121,17 @@ def index():
 @app.route('/api/diagnostico', methods=['POST'])
 def gerar_diagnostico():
     try:
+        # --- LIMITACAO POR IP ---
+        ip = get_client_ip()
+        print(f"DEBUG: requisicao do IP {ip}", flush=True)
+        if not verifica_limite_grauito(ip):
+            print(f"DEBUG: IP {ip} atingiu limite diario", flush=True)
+            return jsonify({
+                'success': False,
+                'limite_atingido': True,
+                'error': 'Voce ja utilizou sua analise gratuita hoje. Tente novamente mais tarde.'
+            }), 429
+
         data = request.json
         arroba = data.get('arroba', '')
         nicho = data.get('nicho', '')
@@ -44,7 +141,6 @@ def gerar_diagnostico():
         imagens = data.get('imagens', [])
 
         print(f"DEBUG: arroba={arroba}, nicho={nicho}", flush=True)
-        print(f"DEBUG: ANTHROPIC_API_KEY presente: {bool(ANTHROPIC_API_KEY)}", flush=True)
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         content = []
@@ -63,14 +159,13 @@ def gerar_diagnostico():
 
         content.append({
             "type": "text",
-            "text": "Perfil: " + arroba + "\nNicho: " + nicho + "\nSeguidores: " + seguidores + "\nObjetivo: " + objetivo + "\nGere o diagnostico."
+            "text": "Perfil: " + arroba + "\nNicho: " + nicho + "\nSeguidores: " + seguidores + "\nObjetivo: " + objetivo + "\nGere o diagnostico estrategico seguindo todas as regras de tom."
         })
 
         print("DEBUG: chamando Anthropic API...", flush=True)
-
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1000,
+            max_tokens=1200,
             system=SYSTEM_DIAGNOSTICO,
             messages=[{"role": "user", "content": content}]
         )
@@ -83,6 +178,10 @@ def gerar_diagnostico():
         analise = json.loads(raw[start:end])
 
         print("DEBUG: JSON parsed com sucesso", flush=True)
+
+        # Registra uso APENAS apos sucesso (se der erro, nao gasta a cota)
+        registra_uso_gratuito(ip)
+        print(f"DEBUG: IP {ip} usou cota, agora em {usos_por_ip[ip]}", flush=True)
 
         session_id = str(uuid.uuid4())
         analises_cache[session_id] = {
@@ -101,9 +200,7 @@ def gerar_diagnostico():
 @app.route('/api/criar-pagamento', methods=['POST'])
 def criar_pagamento():
     try:
-        # Verifica se token existe
         if not MP_ACCESS_TOKEN or not sdk:
-            print("ERRO: MP_ACCESS_TOKEN nao configurado no Railway", flush=True)
             return jsonify({
                 'success': False,
                 'error': 'MP_ACCESS_TOKEN nao configurado no servidor'
@@ -111,9 +208,8 @@ def criar_pagamento():
 
         data = request.json or {}
         session_id = data.get('session_id', str(uuid.uuid4()))
-        base_url = request.host_url.rstrip('/')
+        base_url = get_base_url()
 
-        # Detecta se token e de teste ou producao
         is_test = MP_ACCESS_TOKEN.startswith("TEST-")
         print(f"DEBUG MP: token tipo = {'TEST' if is_test else 'APP_USR'}", flush=True)
         print(f"DEBUG MP: base_url = {base_url}", flush=True)
@@ -144,7 +240,6 @@ def criar_pagamento():
         print(f"DEBUG MP: status={status}", flush=True)
         print(f"DEBUG MP: response={response_body}", flush=True)
 
-        # Se MP retornou erro, mostra qual foi
         if status >= 400 or "id" not in response_body:
             return jsonify({
                 'success': False,
@@ -154,8 +249,6 @@ def criar_pagamento():
                 'mp_response': response_body
             }), 502
 
-        # Tokens TEST- antigos usam sandbox_init_point
-        # Tokens APP_USR- (tanto teste quanto producao) usam init_point
         if is_test:
             checkout_url = response_body.get("sandbox_init_point") or response_body.get("init_point")
         else:
@@ -250,7 +343,7 @@ def analise_completa():
         diag = sessao['diagnostico']
         content.append({
             "type": "text",
-            "text": "Perfil: " + sessao['arroba'] + "\nNicho: " + sessao['nicho'] + "\nProblemas: " + str(diag['problemas']) + "\nGere a analise completa com solucoes."
+            "text": "Perfil: " + sessao['arroba'] + "\nNicho: " + sessao['nicho'] + "\nProblemas: " + str(diag.get('problemas', [])) + "\nGere a analise completa com solucoes."
         })
 
         response = client.messages.create(
