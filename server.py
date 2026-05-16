@@ -461,6 +461,32 @@ PAGINA_BASE = """<!DOCTYPE html>
   @keyframes spin { to { transform: rotate(360deg); } }
   .erro-box { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); padding: 20px; border-radius: 12px; }
   .footer-acoes { text-align: center; margin-top: 32px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  @media print {
+    body { background: white !important; color: #1a1a1a !important; padding: 20px !important; }
+    .container { max-width: 100% !important; }
+    .card {
+      background: white !important; border: 1px solid #ddd !important;
+      color: #1a1a1a !important; page-break-inside: avoid;
+      box-shadow: none !important;
+    }
+    .card h2 { color: #c026d3 !important; }
+    .card p, .card li { color: #1a1a1a !important; }
+    .card li { border-bottom: 1px solid #eee !important; }
+    .card li:before { color: #c026d3 !important; }
+    .bio-box {
+      background: #faf5ff !important; border: 1px solid #e9d5ff !important;
+      color: #1a1a1a !important;
+    }
+    .ideia { background: #f8f8f8 !important; border: 1px solid #eee !important; page-break-inside: avoid; }
+    .ideia .titulo { color: #c026d3 !important; }
+    .ideia .formato { background: #faf5ff !important; color: #86198f !important; }
+    .ideia .desc, .ideia .hook { color: #444 !important; }
+    .ideia .hook { border-top: 1px solid #ddd !important; }
+    .footer-acoes, .botao, .botao-secundario, .nao-imprime { display: none !important; }
+    h1 { color: #1a1a1a !important; }
+    .subtitulo { color: #555 !important; }
+    .icone { color: #00b050 !important; }
+  }
 </style>
 </head>
 <body>
@@ -490,7 +516,8 @@ def pagina_sucesso():
     <p class="subtitulo">Carregando sua analise...</p>
   </div>
 </div>
-<div class="footer-acoes">
+<div class="footer-acoes nao-imprime">
+  <button onclick="window.print()" class="botao">Baixar em PDF</button>
   <a href="/" class="botao botao-secundario">Voltar ao inicio</a>
 </div>
 <script>
