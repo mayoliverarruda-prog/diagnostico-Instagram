@@ -62,32 +62,102 @@ def get_base_url():
     return f"{proto}://{host}"
 
 
+def fechar_chaves_truncadas(s):
+    """Fecha chaves e colchetes em aberto no fim do JSON (caso truncamento)."""
+    abertas_chave = 0
+    abertas_colchete = 0
+    dentro_string = False
+    escape = False
+    for c in s:
+        if escape:
+            escape = False
+            continue
+        if c == '\\':
+            escape = True
+            continue
+        if c == '"':
+            dentro_string = not dentro_string
+            continue
+        if dentro_string:
+            continue
+        if c == '{': abertas_chave += 1
+        elif c == '}': abertas_chave -= 1
+        elif c == '[': abertas_colchete += 1
+        elif c == ']': abertas_colchete -= 1
+    if dentro_string:
+        s += '"'
+    s += ']' * max(0, abertas_colchete)
+    s += '}' * max(0, abertas_chave)
+    return s
+
+
+def consertar_virgulas_faltantes(s):
+    """Tenta adicionar virgulas faltantes em padroes comuns que a IA produz."""
+    # Padrao: "valor" "chave": -> "valor", "chave":
+    s = re.sub(r'"\s*\n\s*"([a-zA-Z_])', r'",\n"\1', s)
+    # Padrao: } { -> },{
+    s = re.sub(r'}\s*\n\s*{', r'},\n{', s)
+    # Padrao: ] [ -> ],[
+    s = re.sub(r']\s*\n\s*\[', r'],\n[', s)
+    # Padrao: "texto"\n"texto2" (entre strings)
+    s = re.sub(r'"\s*\n\s+"', r'",\n"', s)
+    # Padrao: ] "chave" -> ],"chave"
+    s = re.sub(r']\s*\n\s*"([a-zA-Z_])', r'],\n"\1', s)
+    # Padrao: } "chave" -> },"chave"
+    s = re.sub(r'}\s*\n\s*"([a-zA-Z_])', r'},\n"\1', s)
+    return s
+
+
 def parsear_json_da_ia(raw):
     if not raw:
         raise ValueError("Resposta vazia da IA")
     start = raw.find('{')
-    end = raw.rfind('}') + 1
-    if start == -1 or end <= start:
+    if start == -1:
         raise ValueError("JSON nao encontrado na resposta da IA")
-    candidato = raw[start:end]
+    end = raw.rfind('}') + 1
+    if end <= start:
+        candidato = raw[start:]
+    else:
+        candidato = raw[start:end]
+
+    # Tentativa 1: direto
     try:
         return json.loads(candidato)
-    except json.JSONDecodeError:
-        pass
+    except json.JSONDecodeError as e:
+        print(f"DEBUG parser t1: {e}", flush=True)
+
+    # Tentativa 2: remove caracteres de controle
     limpo = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', candidato)
     try:
         return json.loads(limpo)
     except json.JSONDecodeError:
         pass
-    limpo = re.sub(r',(\s*[}\]])', r'\1', limpo)
+
+    # Tentativa 3: remove virgulas extras antes de } ou ]
+    limpo3 = re.sub(r',(\s*[}\]])', r'\1', limpo)
     try:
-        return json.loads(limpo)
+        return json.loads(limpo3)
     except json.JSONDecodeError:
         pass
-    limpo = re.sub(r'}\s*{', '},{', limpo)
-    limpo = re.sub(r']\s*\[', '],[', limpo)
+
+    # Tentativa 4: adiciona virgulas faltantes
+    limpo4 = consertar_virgulas_faltantes(limpo3)
     try:
-        return json.loads(limpo)
+        return json.loads(limpo4)
+    except json.JSONDecodeError as e:
+        print(f"DEBUG parser t4: {e}", flush=True)
+
+    # Tentativa 5: fecha chaves truncadas e tenta de novo
+    limpo5 = fechar_chaves_truncadas(limpo4)
+    try:
+        return json.loads(limpo5)
+    except json.JSONDecodeError:
+        pass
+
+    # Tentativa 6: combina virgulas + fechamento
+    limpo6 = fechar_chaves_truncadas(consertar_virgulas_faltantes(limpo))
+    try:
+        return json.loads(limpo6)
     except json.JSONDecodeError as e:
         raise ValueError(f"JSON invalido apos tentativas: {str(e)[:200]}")
 
@@ -98,14 +168,19 @@ def chamar_ia_com_retry(client, modelo, system_prompt, content, max_tokens, max_
         try:
             extra = ""
             if tentativa > 0:
-                extra = "\n\nIMPORTANTE: gere JSON ESTRITAMENTE valido. Verifique virgulas, aspas duplas e fechamento de chaves."
+                extra = "\n\nATENCAO: a tentativa anterior falhou. Gere JSON ESTRITAMENTE valido. Toda virgula no lugar. Aspas duplas em tudo. Feche todas as chaves e colchetes. NAO use quebra de linha dentro de strings."
+            # Prefill: forca a IA a comecar com { (reduz texto solto antes do JSON)
             response = client.messages.create(
                 model=modelo,
                 max_tokens=max_tokens,
                 system=system_prompt + extra,
-                messages=[{"role": "user", "content": content}]
+                messages=[
+                    {"role": "user", "content": content},
+                    {"role": "assistant", "content": "{"}
+                ]
             )
-            raw = response.content[0].text.strip()
+            # Prefill nao volta na resposta, prefixamos manualmente
+            raw = "{" + response.content[0].text.strip()
             return parsear_json_da_ia(raw)
         except (json.JSONDecodeError, ValueError) as e:
             print(f"DEBUG: tentativa {tentativa + 1} falhou: {e}", flush=True)
@@ -432,7 +507,7 @@ Agora entregue a ANALISE COMPLETA com solucoes prontas, considerando TUDO acima.
             modelo="claude-haiku-4-5-20251001",
             system_prompt=SYSTEM_COMPLETO,
             content=content,
-            max_tokens=4000,
+            max_tokens=6000,
             max_tentativas=3
         )
 
