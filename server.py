@@ -5,6 +5,7 @@ import mercadopago
 import anthropic
 import json
 import os
+import re
 import uuid
 import traceback
 
@@ -22,13 +23,13 @@ sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
 pagamentos_aprovados = set()
 analises_cache = {}
 
-# ============================================================
-# CONTROLE DE LIMITE GRATUITO POR IP
-# ============================================================
 LIMITE_DIARIO = 2
 usos_por_ip = {}
 
 
+# ============================================================
+# UTILS
+# ============================================================
 def get_client_ip():
     forwarded = request.headers.get('X-Forwarded-For', '')
     if forwarded:
@@ -61,6 +62,81 @@ def get_base_url():
     return f"{proto}://{host}"
 
 
+def parsear_json_da_ia(raw):
+    """Parser robusto que tenta varias estrategias para extrair JSON valido."""
+    if not raw:
+        raise ValueError("Resposta vazia da IA")
+
+    start = raw.find('{')
+    end = raw.rfind('}') + 1
+    if start == -1 or end <= start:
+        raise ValueError("JSON nao encontrado na resposta da IA")
+
+    candidato = raw[start:end]
+
+    # Tentativa 1: direto
+    try:
+        return json.loads(candidato)
+    except json.JSONDecodeError as e1:
+        print(f"DEBUG parser tentativa 1 falhou: {e1}", flush=True)
+
+    # Tentativa 2: remove caracteres de controle invalidos
+    limpo = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', candidato)
+    try:
+        return json.loads(limpo)
+    except json.JSONDecodeError as e2:
+        print(f"DEBUG parser tentativa 2 falhou: {e2}", flush=True)
+
+    # Tentativa 3: remove virgulas extras antes de } ou ]
+    limpo = re.sub(r',(\s*[}\]])', r'\1', limpo)
+    try:
+        return json.loads(limpo)
+    except json.JSONDecodeError as e3:
+        print(f"DEBUG parser tentativa 3 falhou: {e3}", flush=True)
+
+    # Tentativa 4: adiciona virgulas entre objetos/arrays adjacentes
+    limpo = re.sub(r'}\s*{', '},{', limpo)
+    limpo = re.sub(r']\s*\[', '],[', limpo)
+    limpo = re.sub(r'"\s*\n\s*"', '",\n"', limpo)
+    try:
+        return json.loads(limpo)
+    except json.JSONDecodeError as e4:
+        print(f"DEBUG parser tentativa 4 falhou: {e4}", flush=True)
+
+    # Tentativa 5: corrige aspas simples por duplas
+    limpo = limpo.replace("'", '"')
+    try:
+        return json.loads(limpo)
+    except json.JSONDecodeError as e5:
+        print(f"DEBUG parser tentativa 5 falhou: {e5}", flush=True)
+        raise ValueError(f"JSON invalido apos todas tentativas. Primeira linha: {candidato[:300]}")
+
+
+def chamar_ia_com_retry(client, modelo, system_prompt, content, max_tokens, max_tentativas=3):
+    """Chama a IA e tenta varias vezes se o JSON vier invalido."""
+    ultima_excecao = None
+    for tentativa in range(max_tentativas):
+        try:
+            print(f"DEBUG: chamada IA tentativa {tentativa + 1}", flush=True)
+            extra = ""
+            if tentativa > 0:
+                extra = "\n\nIMPORTANTE: gere JSON ESTRITAMENTE valido. Verifique virgulas, aspas duplas e fechamento de chaves."
+            response = client.messages.create(
+                model=modelo,
+                max_tokens=max_tokens,
+                system=system_prompt + extra,
+                messages=[{"role": "user", "content": content}]
+            )
+            raw = response.content[0].text.strip()
+            resultado = parsear_json_da_ia(raw)
+            return resultado
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"DEBUG: tentativa {tentativa + 1} falhou: {e}", flush=True)
+            ultima_excecao = e
+            continue
+    raise ultima_excecao or ValueError("Todas as tentativas falharam")
+
+
 # ============================================================
 # PROMPTS
 # ============================================================
@@ -85,21 +161,36 @@ PROIBIDO usar palavras ou expressoes como:
 - Frases absolutas tipo "voce nunca vai crescer"
 
 ESTRUTURA OBRIGATORIA:
-1. percepcao_inicial: como um visitante estrategico le o perfil nos primeiros 3 segundos (1-2 frases, tom neutro e profissional)
-2. pontos_fortes: 2 pontos positivos REAIS que voce observou no perfil (curtos, especificos)
-3. problemas: 3 pontos de melhoria estrategicos, descritos como oportunidades (curtos, especificos, NAO da solucao)
-4. impacto: o que esses pontos estao impedindo o perfil de alcancar (1 paragrafo, tom analitico, sem drama)
-5. frase_gancho: uma frase curta que cria curiosidade pela analise completa, SEM ameacar.
+1. percepcao_inicial
+2. pontos_fortes (2 itens)
+3. problemas (3 itens, descritos como oportunidades, sem solucao)
+4. impacto
+5. frase_gancho
 
-NAO entregue solucoes nesta versao. Apenas diagnostico estrategico.
+REGRAS DO JSON:
+- Responda APENAS com JSON valido sem markdown sem backticks
+- Use aspas duplas em todas as chaves e valores
+- Coloque virgula apos cada item de array exceto o ultimo
+- Coloque virgula apos cada par chave-valor do objeto exceto o ultimo
+- NAO use quebra de linha dentro de strings
+- NAO use caracteres especiais nao escapados
 
-Responda APENAS com JSON valido sem markdown sem backticks:
+Formato:
 {"percepcao_inicial": "...", "pontos_fortes": ["...", "..."], "problemas": ["...", "...", "..."], "impacto": "...", "frase_gancho": "..."}"""
 
 
-SYSTEM_COMPLETO = """Voce e uma consultora estrategica senior de Instagram. Agora entregue a ANALISE COMPLETA com solucoes praticas, estrategia clara e ideias de conteudo aplicaveis. Tom: profissional, consultivo, premium, construtivo. Sem linguagem de coach.
+SYSTEM_COMPLETO = """Voce e uma consultora estrategica senior de Instagram. Entregue a ANALISE COMPLETA com solucoes praticas, estrategia clara e ideias de conteudo aplicaveis. Tom: profissional, consultivo, premium, construtivo. Sem linguagem de coach.
 
-Responda APENAS com JSON valido sem markdown sem backticks: {"bio_reescrita": "nova bio sugerida", "solucoes": ["solucao 1", "solucao 2", "solucao 3", "solucao 4", "solucao 5"], "pilares_conteudo": ["pilar 1", "pilar 2", "pilar 3"], "ideias_conteudo": [{"titulo": "titulo", "formato": "Reel", "descricao": "descricao", "hook": "hook"}], "plano_acao": ["acao 1", "acao 2", "acao 3"]}"""
+REGRAS DO JSON:
+- Responda APENAS com JSON valido sem markdown sem backticks
+- Use aspas duplas em todas as chaves e valores
+- Coloque virgula apos cada item de array exceto o ultimo
+- Coloque virgula apos cada par chave-valor do objeto exceto o ultimo
+- NAO use quebra de linha dentro de strings
+- Se precisar de aspas dentro de uma string, escape com barra invertida
+
+Formato:
+{"bio_reescrita": "nova bio sugerida", "solucoes": ["solucao 1", "solucao 2", "solucao 3", "solucao 4", "solucao 5"], "pilares_conteudo": ["pilar 1", "pilar 2", "pilar 3"], "ideias_conteudo": [{"titulo": "titulo", "formato": "Reel", "descricao": "descricao", "hook": "hook"}], "plano_acao": ["acao 1", "acao 2", "acao 3"]}"""
 
 
 # ============================================================
@@ -116,10 +207,8 @@ def gerar_diagnostico():
         ip = get_client_ip()
         print(f"DEBUG: requisicao do IP {ip}", flush=True)
         if not verifica_limite_grauito(ip):
-            print(f"DEBUG: IP {ip} atingiu limite diario", flush=True)
             return jsonify({
-                'success': False,
-                'limite_atingido': True,
+                'success': False, 'limite_atingido': True,
                 'error': 'Voce ja utilizou sua analise gratuita hoje. Tente novamente mais tarde.'
             }), 429
 
@@ -130,8 +219,6 @@ def gerar_diagnostico():
         objetivo = data.get('objetivo', '')
         obs = data.get('obs', '')
         imagens = data.get('imagens', [])
-
-        print(f"DEBUG: arroba={arroba}, nicho={nicho}", flush=True)
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         content = []
@@ -150,21 +237,17 @@ def gerar_diagnostico():
 
         content.append({
             "type": "text",
-            "text": "Perfil: " + arroba + "\nNicho: " + nicho + "\nSeguidores: " + seguidores + "\nObjetivo: " + objetivo + "\nGere o diagnostico estrategico seguindo todas as regras de tom."
+            "text": "Perfil: " + arroba + "\nNicho: " + nicho + "\nSeguidores: " + seguidores + "\nObjetivo: " + objetivo + "\nGere o diagnostico estrategico seguindo todas as regras de tom e de JSON."
         })
 
-        print("DEBUG: chamando Anthropic API...", flush=True)
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1200,
-            system=SYSTEM_DIAGNOSTICO,
-            messages=[{"role": "user", "content": content}]
+        analise = chamar_ia_com_retry(
+            client=client,
+            modelo="claude-haiku-4-5-20251001",
+            system_prompt=SYSTEM_DIAGNOSTICO,
+            content=content,
+            max_tokens=1500,
+            max_tentativas=3
         )
-
-        raw = response.content[0].text.strip()
-        start = raw.find('{')
-        end = raw.rfind('}') + 1
-        analise = json.loads(raw[start:end])
 
         registra_uso_gratuito(ip)
 
@@ -191,15 +274,12 @@ def criar_pagamento():
         data = request.json or {}
         session_id = data.get('session_id', str(uuid.uuid4()))
         base_url = get_base_url()
-
         is_test = MP_ACCESS_TOKEN.startswith("TEST-")
 
         preference_data = {
             "items": [{
                 "title": "Analise Estrategica Completa Instagram",
-                "quantity": 1,
-                "unit_price": 19.90,
-                "currency_id": "BRL"
+                "quantity": 1, "unit_price": 19.90, "currency_id": "BRL"
             }],
             "back_urls": {
                 "success": base_url + "/sucesso?session=" + session_id,
@@ -241,7 +321,6 @@ def criar_pagamento():
 def webhook():
     try:
         data = request.json
-        print(f"DEBUG WEBHOOK: {data}", flush=True)
         if data and data.get('type') == 'payment':
             payment_id = data['data']['id']
             payment_info = sdk.payment().get(payment_id)
@@ -299,20 +378,17 @@ def analise_completa():
         diag = sessao['diagnostico']
         content.append({
             "type": "text",
-            "text": "Perfil: " + sessao['arroba'] + "\nNicho: " + sessao['nicho'] + "\nProblemas: " + str(diag.get('problemas', [])) + "\nGere a analise completa com solucoes."
+            "text": "Perfil: " + sessao['arroba'] + "\nNicho: " + sessao['nicho'] + "\nProblemas: " + str(diag.get('problemas', [])) + "\nGere a analise completa com solucoes seguindo TODAS as regras de JSON."
         })
 
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1500,
-            system=SYSTEM_COMPLETO,
-            messages=[{"role": "user", "content": content}]
+        resultado = chamar_ia_com_retry(
+            client=client,
+            modelo="claude-haiku-4-5-20251001",
+            system_prompt=SYSTEM_COMPLETO,
+            content=content,
+            max_tokens=2500,
+            max_tentativas=3
         )
-
-        raw = response.content[0].text.strip()
-        start = raw.find('{')
-        end = raw.rfind('}') + 1
-        resultado = json.loads(raw[start:end])
 
         return jsonify({
             'success': True, 'diagnostico': diag,
@@ -349,7 +425,7 @@ PAGINA_BASE = """<!DOCTYPE html>
   .subtitulo { color: #b8b8c8; font-size: 16px; line-height: 1.5; max-width: 600px; margin: 0 auto; }
   .card {
     background: rgba(255,255,255,0.04); border: 1px solid rgba(192,38,211,0.25);
-    border-radius: 16px; padding: 28px; margin-bottom: 20px; backdrop-filter: blur(10px);
+    border-radius: 16px; padding: 28px; margin-bottom: 20px;
   }
   .card h2 {
     font-size: 14px; text-transform: uppercase; letter-spacing: 2px;
@@ -374,9 +450,7 @@ PAGINA_BASE = """<!DOCTYPE html>
     display: inline-block; background: linear-gradient(135deg, #c026d3, #ec4899);
     color: #fff; padding: 14px 32px; border-radius: 10px; text-decoration: none;
     font-weight: 600; font-size: 15px; border: none; cursor: pointer;
-    transition: transform 0.15s ease;
   }
-  .botao:hover { transform: translateY(-2px); }
   .botao-secundario { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #b8b8c8; }
   .loading { text-align: center; padding: 60px 20px; }
   .spinner {
@@ -438,7 +512,7 @@ async function carregar() {
     renderizar(dados);
   } catch (e) {
     document.getElementById('conteudo').innerHTML =
-      '<div class="card erro-box"><p>Nao foi possivel carregar sua analise: ' + e.message + '</p><p style="margin-top:12px; font-size:13px;">Seu pagamento foi aprovado. Entre em contato para receber sua analise manualmente.</p></div>';
+      '<div class="card erro-box"><p>Nao foi possivel carregar sua analise agora: ' + e.message + '</p><p style="margin-top:12px; font-size:13px;">Seu pagamento foi aprovado. Atualize a pagina ou entre em contato.</p></div>';
   }
 }
 function renderizar(dados) {
@@ -475,7 +549,7 @@ def pagina_pendente():
   <h2>Status</h2>
   <p id="status">Verificando pagamento...</p>
   <p style="margin-top:16px; font-size:13px; color:#888;">
-    Pagamentos via PIX costumam ser aprovados em segundos. Boleto pode levar ate 2 dias uteis.
+    Pagamentos via PIX costumam ser aprovados em segundos.
   </p>
 </div>
 <div class="footer-acoes">
@@ -499,10 +573,8 @@ async function verificar() {
     } else {
       document.getElementById('status').textContent = 'Aguardando... (verificacao ' + tentativas + ')';
       if (tentativas < 60) setTimeout(verificar, 5000);
-      else document.getElementById('status').textContent = 'Aguardando ha muito tempo. Voce pode fechar esta pagina e voltar depois.';
     }
   } catch (e) {
-    document.getElementById('status').textContent = 'Erro ao verificar. Tentando novamente...';
     if (tentativas < 60) setTimeout(verificar, 5000);
   }
 }
@@ -519,10 +591,7 @@ def pagina_erro():
 <div class="header">
   <div class="icone">⚠</div>
   <h1>Pagamento nao aprovado</h1>
-  <p class="subtitulo">Algo deu errado com seu pagamento. Voce pode tentar novamente com outro meio.</p>
-</div>
-<div class="card erro-box">
-  <p>Possiveis motivos: cartao recusado, saldo insuficiente, dados incorretos, ou tempo expirado.</p>
+  <p class="subtitulo">Algo deu errado com seu pagamento. Voce pode tentar novamente.</p>
 </div>
 <div class="footer-acoes">
   <a href="/" class="botao">Tentar novamente</a>
