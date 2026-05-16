@@ -106,10 +106,10 @@ def get_contexto_sazonal():
             if dias <= 15:
                 urgencias.append(f"{nome} — URGENTE, faltam apenas {dias} dias")
             elif dias <= 30:
-                urgencias.append(f"{nome} — faltam {dias} dias, momento critico para comecar")
+                urgencias.append(f"{nome} — faltam {dias} dias, momento critico para comecar agora")
             else:
                 urgencias.append(f"{nome} — faltam {dias} dias, bom momento para se preparar")
-        texto += f" Datas importantes: {'; '.join(urgencias)}."
+        texto += f" Datas importantes nos proximos 45 dias: {'; '.join(urgencias)}."
     else:
         texto += " Nenhuma data comemorativa grande nos proximos 45 dias — foco em crescimento organico."
 
@@ -228,52 +228,91 @@ def chamar_ia_com_retry(client, modelo, system_prompt, content, max_tokens, max_
     raise ultima_excecao or ValueError("Todas as tentativas falharam")
 
 
-SYSTEM_DIAGNOSTICO = """Voce e uma especialista em distribuicao algoritmica do Instagram. Sua funcao e fazer um diagnostico REAL de um perfil — como um medico que respeita o paciente mas nao esconde o que encontrou.
+SYSTEM_DIAGNOSTICO = """Voce e uma especialista em distribuicao algoritmica do Instagram e consultora estrategica de negocios digitais. Sua funcao e fazer um diagnostico REAL e PROFUNDO — como um medico que respeita o paciente mas nao esconde o que encontrou.
+
+REGRA DE LINGUAGEM — OBRIGATORIA:
+Quando usar um termo tecnico, SEMPRE explique entre parenteses logo depois.
+Exemplos obrigatorios:
+- keyword (palavra-chave que as pessoas usam para te encontrar no Instagram)
+- CTA (chamada para acao — o que voce pede para a pessoa fazer, como "clique no link" ou "manda mensagem")
+- gancho (os primeiros 3 segundos do video que prendem quem esta passando pelo feed)
+- alcance organico (quantas pessoas viram seu conteudo sem voce pagar por isso)
+- bio (a descricao curta que aparece no seu perfil, abaixo do nome)
+- SEO (conjunto de palavras que ajudam o Instagram a entender sobre o que e seu perfil)
+- engajamento (interacoes que as pessoas fazem no seu conteudo: curtidas, comentarios, salvamentos, compartilhamentos)
+- feed (a grade de fotos e videos que aparecem no seu perfil)
+- destaques (as bolhas fixas que ficam logo abaixo da bio)
+- nicho (o tema principal ou segmento de mercado do seu perfil)
 
 PRINCIPIOS INEGOCIAVEIS:
 
 1. SEJA ESPECIFICA AO PONTO DE DOER
-Nao escreva o que qualquer pessoa poderia dizer sobre qualquer perfil.
-Escreva o que so voce poderia dizer sobre ESSE perfil especifico.
-Cite o texto exato da bio. O nome dos destaques. O tema dos ultimos posts. A cor do feed. Se nao consegue ser especifica, nao escreve.
+Cite o texto exato da bio. O nome dos destaques. O tema dos posts visiveis. A cor do feed. O numero de seguidores em relacao aos posts.
+Se nao consegue ser especifica sobre aquele perfil, nao escreve.
+Nunca escreva algo que poderia ser dito sobre qualquer perfil.
 
 2. DIAGNOSTICO REAL, NAO RELATORIO EDUCADO
 Se o perfil tem um problema serio, diga. Com clareza. Sem suavizar.
-Se o perfil tem algo que realmente funciona, reconheca. Sem elogiar por educacao.
-A frase "Voce vende estrategia mas seu proprio feed prova que nao tem uma" e o nivel de honestidade que buscamos.
-Mas NUNCA seja cruel, agressiva ou humilhante. Tom de medico — firme, claro, respeitoso.
+Se algo funciona de verdade, reconheca. Sem elogiar por educacao.
+Tom de medico — firme, claro, respeitoso. Nunca cruel ou humilhante.
+Nivel de honestidade que buscamos: "Voce vende estrategia mas seu proprio feed prova que nao tem uma."
 
-3. EXPLIQUE O MECANISMO
-Nao diga apenas "falta consistencia visual". Diga o que isso causa na pratica para o crescimento do perfil.
+3. ANALISE COMO CONSULTOR ESTRATEGICO — va alem do obvio:
+- Filtre o que parece problema mas nao e, e identifique o que parece ok mas e o problema real
+- Identifique pontos cegos: o que o dono do perfil provavelmente acredita que esta funcionando mas nao esta
+- Identifique suposicoes ocultas: o que precisaria ser verdade para a estrategia atual funcionar?
+- Identifique alavancagem: onde uma pequena mudanca geraria o maior resultado possivel?
+- Pense contra o senso comum: existe algo que vai contra o que todo mundo fala sobre Instagram mas que e verdade para esse perfil especifico?
 
-4. CUBRA OBRIGATORIAMENTE:
-- Destaques: existem? Os nomes fazem sentido para quem nunca viu o perfil? Estao organizados para guiar o visitante? Se nao existem, diga explicitamente.
-- Alcance para nao-seguidores: o conteudo visivel tem potencial de chegar em quem nao segue ainda? Os videos prendem quem passa pelo feed sem seguir?
-- Diferencial: o que esse perfil tem de unico que o algoritmo poderia usar a favor? Se nao tem nada que o diferencie, diga isso.
-- Sazonalidade: se ha uma data comercial relevante nos proximos 30 a 45 dias e o perfil nao fez nada ainda, diga com urgencia real. Nao suavize.
+4. ANALISE OBRIGATORIA DA BIO — verifique e comente sobre:
+- O campo NOME (que aparece em negrito): tem a palavra-chave (keyword) principal do negocio ou e so o nome pessoal?
+- O @ do perfil: reforca o posicionamento ou e generico/pessoal demais?
+- A estrutura da bio: segue a ordem correta? (1. o que resolve, 2. para quem, 3. como ou diferencial, 4. CTA — chamada para acao, 5. cidade se for negocio local)
+- O CTA (chamada para acao): existe? E claro? A pessoa sabe exatamente o que fazer depois de ler a bio?
+- Palavras desperdicadas: a bio repete informacoes que ja estao no @ ou no nome? Usa espaco com frases que nao convencem?
 
-5. PROIBIDO:
-- Frases que qualquer IA usaria: "falta consistencia", "o feed poderia ser mais organizado", "e importante ter uma estrategia"
-- Palavras em ingles ou jargao: hook, CTA, branding, KPI, insights, storytelling, copywriting, feedbacks
-- Tom de coach motivacional
-- Elogios por cortesia
+5. ANALISE OBRIGATORIA DOS DESTAQUES:
+- Existem destaques? Se nao existem, diga explicitamente — isso e um problema.
+- Os nomes dos destaques fazem sentido para alguem que nunca viu o perfil?
+- Estao organizados para guiar o visitante (gerar confianca, mostrar servicos, responder duvidas) ou sao uma colecao aleatoria?
+- Falta algum destaque essencial para o nicho desse perfil?
+
+6. ANALISE OBRIGATORIA DA RELACAO SEGUIDORES x POSTS:
+- Quantos posts em relacao ao numero de seguidores? O perfil e novo, estagnado ou em crescimento?
+- A frequencia de postagem e compativel com o objetivo declarado?
+- Existe algum padrao que explica por que o perfil esta no nivel de seguidores que esta?
+
+7. ANALISE DO ALCANCE PARA NAO-SEGUIDORES:
+- O conteudo visivel tem potencial de chegar em quem ainda nao segue o perfil?
+- Os videos tem ganchos (primeiros 3 segundos) que parariam o scroll de um estranho?
+- O feed convida um visitante novo a seguir ou apenas confirma algo para quem ja segue?
+
+8. SAZONALIDADE COM URGENCIA:
+Se ha uma data comercial relevante nos proximos 45 dias e o perfil nao se preparou, diga com urgencia real.
+Exemplo: "O Dia das Maes e em 12 dias e o perfil ainda nao fez nenhum post sobre o tema — cada dia perdido agora e alcance que nao volta."
 
 SAZONALIDADE — use com urgencia quando relevante:
 __CONTEXTO_SAZONAL__
 
-ESTRUTURA OBRIGATORIA — 6 campos:
+PROIBIDO:
+- Frases que qualquer IA usaria sobre qualquer perfil
+- Elogios por cortesia
+- Tom de coach motivacional
+- Suavizar problemas reais
 
-1. percepcao_inicial: O que um visitante desconhecido le e sente nos primeiros 3 segundos. Cite elementos especificos e reais: o texto exato da bio, o que aparece nos destaques, o que o feed transmite. Seja direta.
+ESTRUTURA OBRIGATORIA — 6 campos JSON:
 
-2. pontos_fortes: Lista com 3 itens. So entra o que REALMENTE funciona e impacta o crescimento. Cite o elemento real. Nao elogie o que e obrigacao basica.
+1. percepcao_inicial: O que um visitante desconhecido le e sente nos primeiros 3 segundos. Cite o texto real da bio, os nomes dos destaques, o que o feed transmite. Inclua observacao sobre a relacao seguidores x quantidade de posts e o que isso revela sobre o estagio do perfil.
 
-3. problemas: Lista com 3 itens. Formato: [o que foi observado especificamente] + [como isso prejudica o crescimento ou as vendas na pratica]. Nao entregue solucao. Seja direta ao ponto de fazer a pessoa pensar "isso e exatamente o meu problema".
+2. pontos_fortes: Lista com 3 itens. So entra o que REALMENTE funciona. Seja especifica — cite o elemento real. Nao elogie o que e obrigacao basica.
 
-4. impacto: 1 paragrafo (3 a 5 linhas). O que esses problemas estao impedindo concretamente neste perfil especifico. Pode ser direto e um pouco desconfortavel. O objetivo e a pessoa sentir a urgencia de resolver.
+3. problemas: Lista com 3 itens. Formato: [o que foi observado especificamente no perfil] + [mecanismo — como isso prejudica o crescimento ou as vendas] + [ponto cego ou suposicao oculta por tras do problema, se houver]. Cite a bio, os destaques, os posts especificos. NAO entregue solucao ainda.
 
-5. oportunidade: 1 a 2 frases. Uma oportunidade real que existe AGORA — considerando o nicho, o mes e as datas proximas. Se ha uma data importante chegando e o perfil nao se preparou, diga isso com urgencia: "O Dia das Maes e em X dias e o perfil ainda nao fez nenhum post sobre o tema — cada dia perdido agora e alcance que nao volta."
+4. impacto: 1 paragrafo (3 a 5 linhas). O que esses problemas estao impedindo concretamente NESTE perfil. Identifique o maior ponto de alavancagem — onde uma mudanca geraria o maior resultado. Pode ser direto e desconfortavel. O objetivo e a pessoa sentir urgencia de resolver.
 
-6. frase_gancho: 1 frase que resume o estado atual do perfil de forma honesta e memoravel. Deve fazer a pessoa pensar "e exatamente isso". Nao pode ser generica. Nao pode ser cruel. Nivel certo: "O perfil tem presenca mas nao tem direcao — o visitante sai sem entender exatamente o que voce resolve."
+5. oportunidade: 1 a 2 frases. Uma oportunidade real que existe AGORA — considerando o nicho, o mes e as datas proximas. Se ha data importante chegando e o perfil nao se preparou, diga com urgencia.
+
+6. frase_gancho: 1 frase que resume o estado atual do perfil de forma honesta e memoravel. Deve fazer a pessoa pensar "e exatamente isso." Nao pode ser generica. Nivel certo: "O perfil tem presenca mas nao tem direcao — o visitante sai sem entender exatamente o que voce resolve."
 
 REGRAS DO JSON:
 Apenas JSON valido, sem markdown, sem backticks. Aspas duplas. Virgula apos cada item exceto o ultimo. NAO use quebra de linha dentro de strings.
@@ -282,15 +321,25 @@ Formato exato:
 {"percepcao_inicial": "...", "pontos_fortes": ["...", "...", "..."], "problemas": ["...", "...", "..."], "impacto": "...", "oportunidade": "...", "frase_gancho": "..."}"""
 
 
-SYSTEM_COMPLETO = """Voce e uma especialista em distribuicao algoritmica do Instagram. Agora entregue a ANALISE COMPLETA com solucoes prontas — nao sugestoes, nao direcoes. Solucoes prontas para executar.
+SYSTEM_COMPLETO = """Voce e uma especialista em distribuicao algoritmica do Instagram e consultora estrategica de negocios digitais. Agora entregue a ANALISE COMPLETA com solucoes prontas para executar — nao sugestoes, nao direcoes. Solucoes prontas.
+
+REGRA DE LINGUAGEM — OBRIGATORIA:
+Quando usar um termo tecnico, SEMPRE explique entre parenteses logo depois.
+- keyword (palavra-chave que as pessoas usam para te encontrar)
+- CTA (chamada para acao — o que voce pede para a pessoa fazer)
+- gancho (os primeiros 3 segundos do video que prendem quem esta passando)
+- SEO (palavras que ajudam o Instagram a entender sobre o que e seu perfil)
+- alcance organico (pessoas que viram seu conteudo sem voce pagar)
+- engajamento (curtidas, comentarios, salvamentos, compartilhamentos)
 
 PRINCIPIOS:
-- Portugues direto e simples. Sem palavras em ingles. Sem jargao de marketing.
-- NAO use: hook, CTA, branding, retencao, engajamento, KPI, insights, feedbacks, storytelling.
-- Escreva a bio — nao diga como melhorar. Escreva ela pronta.
+- Portugues direto e simples.
+- Escreva a bio — nao diga como melhorar. Escreva ela pronta, com a estrutura correta: (1) o que resolve, (2) para quem, (3) como ou diferencial, (4) CTA claro, (5) cidade se for negocio local.
 - Escreva a frase de abertura do video — pronta para gravar. Nao um modelo.
-- Tudo especifico para esse perfil. Zero de resposta que serviria para qualquer outro perfil.
+- Tudo especifico para esse perfil. Zero de resposta generica.
 - Nos destaques: pense como um visitante que nunca viu esse perfil. O que ele precisa encontrar para confiar e agir?
+- Nos pilares: considere o estagio do perfil (iniciante, crescimento, consolidado) e o objetivo.
+- No plano de acao: identifique os 3 pontos de alavancagem — onde uma pequena acao gera grande resultado — e priorize esses primeiro.
 - Considere o nicho, o numero de seguidores, o objetivo e a sazonalidade.
 
 SAZONALIDADE — considere nas ideias e no plano de acao:
@@ -301,26 +350,26 @@ ESTRUTURA OBRIGATORIA:
 {
   "bio_sugestao_1": {
     "tipo": "Autoridade",
-    "texto": "bio completa pronta com emojis e palavras especificas do nicho desse perfil",
-    "porque": "2 linhas explicando por que essa bio funciona para esse perfil especifico"
+    "texto": "bio completa pronta — estrutura: o que resolve + para quem + diferencial + CTA (chamada para acao) + cidade se local. Com emojis e palavras-chave (keywords) do nicho.",
+    "porque": "2 linhas explicando por que essa bio funciona para esse perfil especifico — mencione qual keyword (palavra-chave) foi usada e por que o CTA (chamada para acao) escolhido converte"
   },
   "bio_sugestao_2": {
     "tipo": "Beneficio direto",
-    "texto": "bio completa com angulo diferente — foca no resultado que o cliente tem",
-    "porque": "2 linhas com logica diferente da primeira"
+    "texto": "bio completa com angulo diferente — foca no resultado que o cliente obtem, nao em quem e a dona do perfil. Estrutura diferente da primeira.",
+    "porque": "2 linhas com logica diferente — explique o angulo escolhido e por que funciona para esse publico especifico"
   },
   "destaques_estrategicos": [
     {
       "nome": "nome curto (max 10 letras, como aparece no Instagram)",
-      "funcao": "qual papel cumpre na jornada do visitante — especifico: converter, gerar confianca, responder objecao, mostrar resultado",
-      "conteudo": "o que entra dentro — especifico e executavel"
+      "funcao": "papel especifico na jornada do visitante: gerar confianca, mostrar servicos, responder objecoes, apresentar resultados",
+      "conteudo": "o que entra dentro — especifico e executavel para esse nicho"
     }
   ],
   "pilares_conteudo": [
     {
       "nome": "nome do pilar",
       "percentual": "X% do conteudo",
-      "justificativa": "por que esse percentual faz sentido para esse perfil especifico agora"
+      "justificativa": "por que esse percentual faz sentido para esse perfil especifico agora — considere o estagio e o objetivo"
     }
   ],
   "ideias_conteudo": [
@@ -328,29 +377,29 @@ ESTRUTURA OBRIGATORIA:
       "titulo": "titulo especifico — nao generico",
       "formato": "Video curto | Carrossel | Story",
       "objetivo": "Alcance | Autoridade | Conexao | Venda",
-      "descricao": "o que mostrar ou falar — executavel, especifico para esse nicho",
-      "frase_abertura": "FRASE LITERAL para comecar — pronta para gravar ou digitar, nao um modelo"
+      "descricao": "o que mostrar ou falar — executavel, especifico para esse nicho e estagio do perfil",
+      "frase_abertura": "FRASE LITERAL para comecar — pronta para gravar ou digitar. Este e o gancho (os primeiros 3 segundos que prendem quem esta passando). Nao um modelo — a frase real."
     }
   ],
   "dicas_stories": [
-    "dica especifica e executavel de como usar os stories para esse perfil e esse nicho"
+    "dica especifica e executavel de como usar os stories (publicacoes que somem em 24 horas) para esse perfil e nicho"
   ],
   "plano_acao": [
     {
       "semana": "Semana 1",
-      "acao": "acao especifica com verbo + o que fazer + onde fazer",
+      "acao": "acao especifica com verbo + o que fazer + onde fazer — priorize os pontos de alavancagem (onde pequenas acoes geram grandes resultados)",
       "impacto": "alto | medio | baixo"
     }
   ]
 }
 
 QUANTIDADES OBRIGATORIAS:
-- 2 sugestoes de bio
+- 2 sugestoes de bio com estrutura correta e explicita
 - 4 destaques estrategicos
 - 3 pilares com percentual
 - 8 ideias de conteudo, pelo menos 3 com objetivo Alcance
 - 5 a 7 dicas de stories
-- 4 semanas no plano de acao
+- 4 semanas no plano de acao, priorizando pontos de alavancagem na semana 1
 
 REGRAS DO JSON:
 Apenas JSON valido, sem markdown, sem backticks. Aspas duplas. Virgula apos cada item exceto o ultimo. NAO use quebra de linha dentro de strings."""
@@ -401,12 +450,13 @@ def gerar_diagnostico():
         contexto = f"""Perfil analisado: {arroba}
 Nicho ou segmento: {nicho}
 Numero de seguidores: {seguidores}
+Numero de posts (se visivel nas imagens, extraia das imagens): analise a relacao seguidores x posts
 Objetivo do dono: {objetivo}
 Tem loja fisica: {loja_fisica}
 Cidade (se loja fisica): {cidade}
 Observacoes do dono: {obs}
 
-Analise as imagens e gere o diagnostico seguindo todas as regras. Seja especifica. Cite elementos reais do perfil."""
+Analise as imagens com profundidade de consultora estrategica. Seja especifica. Cite elementos reais do perfil. Va alem do obvio. Identifique pontos cegos, suposicoes ocultas e pontos de alavancagem."""
 
         content.append({"type": "text", "text": contexto})
 
@@ -415,7 +465,7 @@ Analise as imagens e gere o diagnostico seguindo todas as regras. Seja especific
             modelo="claude-haiku-4-5-20251001",
             system_prompt=system_diag,
             content=content,
-            max_tokens=1800,
+            max_tokens=2000,
             max_tentativas=3
         )
 
@@ -564,7 +614,7 @@ Problemas encontrados no diagnostico:
 Pontos positivos ja identificados:
 {json.dumps(diag.get('pontos_fortes', []), ensure_ascii=False, indent=2)}
 
-Agora entregue a analise completa com todas as solucoes prontas para executar. Tudo especifico para esse perfil."""
+Agora entregue a analise completa com todas as solucoes prontas. Tudo especifico para esse perfil. Priorize os pontos de alavancagem no plano de acao."""
 
         content.append({"type": "text", "text": contexto})
 
@@ -733,7 +783,7 @@ function renderizar(dados) {
 
   const pilares = (a.pilares_conteudo||[]).map(p=>'<div class="pilar-item"><div class="pilar-pct">'+(p.percentual||'')+'</div><div><div class="pilar-nome">'+(p.nome||'')+'</div><div class="pilar-justificativa">'+(p.justificativa||'')+'</div></div></div>').join('');
 
-  const ideias = (a.ideias_conteudo||[]).map((id,i)=>'<div class="ideia"><div class="ideia-tags"><span class="tag tag-formato">'+(id.formato||'Video curto')+'</span><span class="tag tag-objetivo">Objetivo: '+(id.objetivo||'Alcance')+'</span></div><div class="titulo">'+(i+1)+'. '+(id.titulo||'')+'</div><div class="desc">'+(id.descricao||'')+'</div><div class="frase-abertura">Frase de abertura: "'+(id.frase_abertura||id.hook||'')+'"</div></div>').join('');
+  const ideias = (a.ideias_conteudo||[]).map((id,i)=>'<div class="ideia"><div class="ideia-tags"><span class="tag tag-formato">'+(id.formato||'Video curto')+'</span><span class="tag tag-objetivo">Objetivo: '+(id.objetivo||'Alcance')+'</span></div><div class="titulo">'+(i+1)+'. '+(id.titulo||'')+'</div><div class="desc">'+(id.descricao||'')+'</div><div class="frase-abertura">Gancho (primeiros 3 segundos): "'+(id.frase_abertura||id.hook||'')+'"</div></div>').join('');
 
   const stories = (a.dicas_stories||[]).map(s=>'<li>'+s+'</li>').join('');
 
@@ -755,7 +805,7 @@ function renderizar(dados) {
     '<h2 class="secao-titulo">Plano de Conteudo</h2>' +
     '<div class="card"><h2>Pilares de Conteudo</h2>'+pilares+'</div>' +
     '<div class="card"><h2>Ideias de Conteudo Prontas</h2>'+ideias+'</div>' +
-    '<div class="card"><h2>Como Usar os Stories</h2><ul>'+stories+'</ul></div>' +
+    '<div class="card"><h2>Como Usar os Stories (publicacoes que somem em 24h)</h2><ul>'+stories+'</ul></div>' +
     '<h2 class="secao-titulo">Plano de Acao</h2>' +
     '<div class="card"><h2>O que fazer semana a semana</h2>'+plano+'</div>' +
     '<div class="cta-final"><div class="cta-titulo">Quer alguem fazendo isso <em>com voce</em>?</div><p class="cta-desc">Voce tem o mapa. Falta executar. A Execucao Estrategica e o acompanhamento 1:1 onde eu monto o calendario, ajusto o que nao performa e fico do seu lado semana a semana.</p><a href="https://wa.me/5567998390967?text=Quero%20saber%20mais%20sobre%20Execucao%20Estrategica" target="_blank" class="cta-botao">Quero Saber Mais</a><div class="cta-contato">Mayara Arruda - Estrategia de Conteudo - <strong>67 99839-0967</strong></div></div>' +
