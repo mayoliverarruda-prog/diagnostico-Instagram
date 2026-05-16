@@ -783,14 +783,45 @@ function renderizar(dados) {
 
   const pilares = (a.pilares_conteudo||[]).map(p=>'<div class="pilar-item"><div class="pilar-pct">'+(p.percentual||'')+'</div><div><div class="pilar-nome">'+(p.nome||'')+'</div><div class="pilar-justificativa">'+(p.justificativa||'')+'</div></div></div>').join('');
 
-  const ideias = (a.ideias_conteudo||[]).map((id,i)=>'<div class="ideia"><div class="ideia-tags"><span class="tag tag-formato">'+(id.formato||'Video curto')+'</span><span class="tag tag-objetivo">Objetivo: '+(id.objetivo||'Alcance')+'</span></div><div class="titulo">'+(i+1)+'. '+(id.titulo||'')+'</div><div class="desc">'+(id.descricao||'')+'</div><div class="frase-abertura">Gancho (primeiros 3 segundos): "'+(id.frase_abertura||id.hook||'')+'"</div></div>').join('');
+  // Legenda dos formatos
+  const legendaFormatos =
+    '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:16px">' +
+    '<p style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Para que serve cada formato</p>' +
+    '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#c9cdd4">' +
+    '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(176,38,255,.2);color:#B026FF;border:1px solid rgba(176,38,255,.3);white-space:nowrap;flex-shrink:0">Video curto (Reels)</span>' +
+    '<span>Melhor para alcance (chegar em pessoas que ainda nao te seguem). O algoritmo distribui Reels para fora dos seus seguidores.</span></div>' +
+    '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#c9cdd4">' +
+    '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(255,41,192,.2);color:#FF29C0;border:1px solid rgba(255,41,192,.3);white-space:nowrap;flex-shrink:0">Carrossel (opcional)</span>' +
+    '<span>Funciona melhor para quem ja te segue — gera salvamentos e aprofunda o tema. Pode ser substituido por um Reels se preferir nao fazer posts com varios slides.</span></div>' +
+    '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;font-size:13px;color:#c9cdd4">' +
+    '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(180,170,215,.2);color:#B4AAD7;border:1px solid rgba(180,170,215,.3);white-space:nowrap;flex-shrink:0">Story</span>' +
+    '<span>Para quem ja te segue — mantem presenca diaria, gera conversas e e otimo para mostrar bastidores e fazer perguntas.</span></div>' +
+    '</div>';
 
-  const stories = (a.dicas_stories||[]).map(s=>'<li>'+s+'</li>').join('');
-
-  const plano = (a.plano_acao||[]).map(s=>{
-    const cls=(s.impacto||'').toLowerCase()==='alto'?'impacto-alto':(s.impacto||'').toLowerCase()==='medio'?'impacto-medio':'impacto-baixo';
-    return '<div class="semana-item"><div class="semana-label">'+(s.semana||'')+'</div><div class="semana-acao">'+(s.acao||'')+' <span class="semana-impacto '+cls+'">Impacto '+(s.impacto||'')+'</span></div></div>';
+  const ideias = (a.ideias_conteudo||[]).map((id,i)=>{
+    const fmt = (id.formato||'Video curto');
+    const isCarrossel = fmt.toLowerCase().includes('carrossel');
+    const fmtLabel = isCarrossel ? fmt+' (pode substituir por Reels)' : fmt;
+    return '<div class="ideia"><div class="ideia-tags"><span class="tag tag-formato">'+fmtLabel+'</span><span class="tag tag-objetivo">Objetivo: '+(id.objetivo||'Alcance')+'</span></div><div class="titulo">'+(i+1)+'. '+(id.titulo||'')+'</div><div class="desc">'+(id.descricao||'')+'</div><div class="frase-abertura">Gancho — primeiros 3 segundos (a frase que prende quem esta passando): "'+(id.frase_abertura||id.hook||'')+'"</div></div>';
   }).join('');
+
+  // Stories — tenta varios nomes de campo possiveis
+  const storiesArr = a.dicas_stories || a.stories || a.dicas_de_stories || a.estrategia_stories || [];
+  const stories = storiesArr.length > 0
+    ? storiesArr.map(s => typeof s === 'string' ? '<li>'+s+'</li>' : '<li>'+(s.dica||s.acao||JSON.stringify(s))+'</li>').join('')
+    : '<li style="color:var(--muted)">Consulte a estrategista para dicas personalizadas de stories para o seu nicho.</li>';
+
+  // Plano de acao — tenta varios nomes de campo possiveis
+  const planoArr = a.plano_acao || a.plano || a.acoes || a.cronograma || [];
+  const plano = planoArr.length > 0
+    ? planoArr.map(s=>{
+        const semana = s.semana || s.periodo || s.etapa || 'Acao';
+        const acao = s.acao || s.descricao || s.tarefa || (typeof s === 'string' ? s : '');
+        const impacto = (s.impacto||'').toLowerCase();
+        const cls = impacto==='alto'?'impacto-alto':impacto==='medio'?'impacto-medio':'impacto-baixo';
+        return '<div class="semana-item"><div class="semana-label">'+semana+'</div><div class="semana-acao">'+acao+(s.impacto?' <span class="semana-impacto '+cls+'">Impacto '+s.impacto+'</span>':'')+'</div></div>';
+      }).join('')
+    : '<div class="semana-item"><div class="semana-acao" style="color:var(--muted)">Plano de acao nao disponivel. Fale com Mayara para receber orientacao personalizada.</div></div>';
 
   document.getElementById('conteudo').innerHTML =
     capa +
@@ -804,8 +835,8 @@ function renderizar(dados) {
     '<div class="card"><h2>Destaques do Perfil</h2>'+destaques+'</div>' +
     '<h2 class="secao-titulo">Plano de Conteudo</h2>' +
     '<div class="card"><h2>Pilares de Conteudo</h2>'+pilares+'</div>' +
-    '<div class="card"><h2>Ideias de Conteudo Prontas</h2>'+ideias+'</div>' +
-    '<div class="card"><h2>Como Usar os Stories (publicacoes que somem em 24h)</h2><ul>'+stories+'</ul></div>' +
+    '<div class="card"><h2>Ideias de Conteudo Prontas</h2>'+legendaFormatos+ideias+'</div>' +
+    '<div class="card"><h2>Como Usar os Stories — publicacoes que somem em 24 horas</h2><ul>'+stories+'</ul></div>' +
     '<h2 class="secao-titulo">Plano de Acao</h2>' +
     '<div class="card"><h2>O que fazer semana a semana</h2>'+plano+'</div>' +
     '<div class="cta-final"><div class="cta-titulo">Quer alguem fazendo isso <em>com voce</em>?</div><p class="cta-desc">Voce tem o mapa. Falta executar. A Execucao Estrategica e o acompanhamento 1:1 onde eu monto o calendario, ajusto o que nao performa e fico do seu lado semana a semana.</p><a href="https://wa.me/5567998390967?text=Quero%20saber%20mais%20sobre%20Execucao%20Estrategica" target="_blank" class="cta-botao">Quero Saber Mais</a><div class="cta-contato">Mayara Arruda - Estrategia de Conteudo - <strong>67 99839-0967</strong></div></div>' +
