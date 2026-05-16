@@ -92,6 +92,30 @@ select option { background: #120820; }
   border-radius: 0 8px 8px 0; padding: 14px 16px; margin-bottom: 10px;
   font-size: 14px; color: #c9cdd4; line-height: 1.7;
 }
+
+/* LEGENDA DE FORMATOS */
+.formatos-legenda {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;
+}
+.formatos-legenda p {
+  font-size: 11px; font-weight: 700; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 12px;
+}
+.formato-linha {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 13px; color: #c9cdd4; line-height: 1.5;
+}
+.formato-linha:last-child { border-bottom: none; }
+.formato-badge {
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
+  white-space: nowrap; flex-shrink: 0; margin-top: 1px;
+}
+.badge-reels { background: rgba(176,38,255,.2); color: #B026FF; border: 1px solid rgba(176,38,255,.3); }
+.badge-carrossel { background: rgba(255,41,192,.2); color: #FF29C0; border: 1px solid rgba(255,41,192,.3); }
+.badge-story { background: rgba(180,170,215,.2); color: #B4AAD7; border: 1px solid rgba(180,170,215,.3); }
+
 .oferta-box {
   background: linear-gradient(135deg, rgba(176,38,255,.15), rgba(255,41,192,.1));
   border: 1px solid rgba(176,38,255,.4); border-radius: 14px; padding: 32px; text-align: center;
@@ -231,7 +255,7 @@ select option { background: #120820; }
       <div class="section-label">💸 O que isso está impedindo</div>
       <p id="impacto" style="font-size:14px;line-height:1.8;color:#c9cdd4"></p>
     </div>
-    <div class="card fade" style="border-color:rgba(0,214,143,.25);background:rgba(0,214,143,.04)">
+    <div class="card fade" style="border-color:rgba(0,214,143,.25);background:rgba(0,214,143,.04)" id="cardOportunidade">
       <div class="section-label">🌟 Oportunidade do momento</div>
       <p id="oportunidade" style="font-size:14px;line-height:1.8;color:#c9cdd4"></p>
     </div>
@@ -249,12 +273,12 @@ select option { background: #120820; }
       <p style="color:var(--muted);font-size:13px;margin-bottom:20px">Tudo que você precisa pra executar — sem precisar de mais ninguém</p>
 
       <div class="oferta-lista">
-        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>2 sugestões de bio prontas</strong> com explicação de por que cada uma funciona</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>2 sugestões de bio prontas</strong> com a estrutura correta e explicação de por que cada uma funciona</span></div>
         <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>4 destaques estratégicos</strong> com nome, função e o que colocar em cada um</span></div>
         <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>3 tipos de conteúdo</strong> com o percentual certo no calendário</span></div>
-        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>8 ideias de conteúdo prontas</strong> com formato, descrição e frase de abertura pronta para gravar</span></div>
-        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Como usar os stories</strong> de forma estratégica para engajar e vender</span></div>
-        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Plano de ação semana a semana</strong> com o que fazer primeiro</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>8 ideias de conteúdo prontas</strong> com formato, descrição e frase de abertura pronta para gravar ou digitar</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Como usar os stories</strong> (publicações que somem em 24h) de forma estratégica</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Plano de ação semana a semana</strong> priorizando o que gera mais resultado primeiro</span></div>
         <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>PDF profissional</strong> para baixar e consultar quando quiser</span></div>
       </div>
 
@@ -358,30 +382,31 @@ async function gerarDiagnostico() {
 function renderDiagnostico(a) {
   document.getElementById('loading').style.display = 'none';
 
-  document.getElementById('percepcao').textContent = a.percepcao_inicial;
-  document.getElementById('impacto').textContent = a.impacto;
-  document.getElementById('gancho').textContent = `"${a.frase_gancho}"`;
+  document.getElementById('percepcao').textContent = a.percepcao_inicial || '';
+  document.getElementById('impacto').textContent = a.impacto || '';
+  document.getElementById('gancho').textContent = a.frase_gancho ? `"${a.frase_gancho}"` : '';
 
-  // Oportunidade (campo novo)
+  // Oportunidade
   const oportunidadeEl = document.getElementById('oportunidade');
+  const cardOport = document.getElementById('cardOportunidade');
   if (a.oportunidade) {
     oportunidadeEl.textContent = a.oportunidade;
-    oportunidadeEl.closest('.card').style.display = 'block';
+    cardOport.style.display = 'block';
   } else {
-    oportunidadeEl.closest('.card').style.display = 'none';
+    cardOport.style.display = 'none';
   }
 
+  // Pontos fortes
   const pontosDiv = document.getElementById('pontos-fortes');
-  pontosDiv.innerHTML = (a.pontos_fortes || []).map(p => `
-    <div class="ponto-forte-item">${p}</div>
-  `).join('');
+  pontosDiv.innerHTML = (a.pontos_fortes || []).map(p =>
+    `<div class="ponto-forte-item">${p}</div>`
+  ).join('');
 
+  // Problemas
   const probDiv = document.getElementById('problemas');
-  probDiv.innerHTML = (a.problemas || []).map((p, i) => `
-    <div class="problema-item">
-      <strong style="color:#FF29C0">Problema ${i+1}:</strong> ${p}
-    </div>
-  `).join('');
+  probDiv.innerHTML = (a.problemas || []).map((p, i) =>
+    `<div class="problema-item"><strong style="color:#FF29C0">Problema ${i+1}:</strong> ${p}</div>`
+  ).join('');
 
   document.getElementById('diagnostico').style.display = 'block';
   document.getElementById('oferta').style.display = 'block';
