@@ -39,6 +39,16 @@ h1 { font-family: 'Playfair Display', serif; font-size: clamp(32px,5vw,54px); fo
 h1 em { font-style: italic; color: var(--accent); }
 .subtitle { margin-top: 12px; color: var(--muted); font-size: 14px; max-width: 420px; margin-left: auto; margin-right: auto; line-height: 1.7; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 32px; margin-bottom: 16px; }
+.card-lead {
+  background: var(--surface); border: 2px solid var(--accent); border-radius: 14px;
+  padding: 32px; margin-bottom: 16px; position: relative;
+}
+.card-lead-tag {
+  position: absolute; top: -13px; left: 20px;
+  background: var(--accent); color: #fff;
+  font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  padding: 3px 12px; border-radius: 4px;
+}
 label { display: block; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; font-weight: 600; }
 input, textarea, select {
   width: 100%; background: var(--surface2); border: 1px solid var(--border);
@@ -50,7 +60,12 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 select option { background: #120820; }
 .field { margin-bottom: 18px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media(max-width:560px) { .row2 { grid-template-columns: 1fr; } }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+@media(max-width:620px) { .row2, .row3 { grid-template-columns: 1fr; } }
+.required-star { color: var(--accent); }
+.optional-tag { font-size: 10px; color: var(--muted); text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 4px; }
+.privacidade { font-size: 11px; color: var(--muted); margin-top: 12px; display: flex; align-items: center; gap: 6px; }
+.privacidade::before { content: '🔒'; font-size: 11px; }
 .upload-area {
   border: 2px dashed var(--border); border-radius: 10px; padding: 28px;
   text-align: center; cursor: pointer; transition: border-color .2s; position: relative;
@@ -92,30 +107,6 @@ select option { background: #120820; }
   border-radius: 0 8px 8px 0; padding: 14px 16px; margin-bottom: 10px;
   font-size: 14px; color: #c9cdd4; line-height: 1.7;
 }
-
-/* LEGENDA DE FORMATOS */
-.formatos-legenda {
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;
-}
-.formatos-legenda p {
-  font-size: 11px; font-weight: 700; letter-spacing: 2px;
-  text-transform: uppercase; color: var(--muted); margin-bottom: 12px;
-}
-.formato-linha {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
-  font-size: 13px; color: #c9cdd4; line-height: 1.5;
-}
-.formato-linha:last-child { border-bottom: none; }
-.formato-badge {
-  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;
-  white-space: nowrap; flex-shrink: 0; margin-top: 1px;
-}
-.badge-reels { background: rgba(176,38,255,.2); color: #B026FF; border: 1px solid rgba(176,38,255,.3); }
-.badge-carrossel { background: rgba(255,41,192,.2); color: #FF29C0; border: 1px solid rgba(255,41,192,.3); }
-.badge-story { background: rgba(180,170,215,.2); color: #B4AAD7; border: 1px solid rgba(180,170,215,.3); }
-
 .oferta-box {
   background: linear-gradient(135deg, rgba(176,38,255,.15), rgba(255,41,192,.1));
   border: 1px solid rgba(176,38,255,.4); border-radius: 14px; padding: 32px; text-align: center;
@@ -134,8 +125,7 @@ select option { background: #120820; }
   border: 1px solid rgba(176,38,255,.3); border-radius: 14px;
   padding: 40px 28px; text-align: center;
 }
-.limite-icone { font-size: 48px; margin-bottom: 16px; }
-.limite-titulo { font-family: 'Playfair Display', serif; font-size: 26px; font-weight: 700; margin-bottom: 12px; color: var(--text); }
+.limite-titulo { font-family: 'Playfair Display', serif; font-size: 26px; font-weight: 700; margin-bottom: 12px; }
 .limite-texto { color: var(--muted); font-size: 14px; line-height: 1.7; margin-bottom: 20px; max-width: 480px; margin-left: auto; margin-right: auto; }
 #error { display: none; background: rgba(245,66,66,.08); border: 1px solid rgba(245,66,66,.2); border-radius: 10px; padding: 16px; color: #f54242; font-size: 13px; text-align: center; margin-top: 16px; }
 .footer-brand { text-align: center; margin-top: 48px; padding-top: 24px; border-top: 1px solid var(--border); }
@@ -147,7 +137,6 @@ select option { background: #120820; }
 </head>
 <body>
 <div class="wrap">
-
   <header>
     <div class="logo">
       <div class="logo-icon">MA</div>
@@ -160,6 +149,8 @@ select option { background: #120820; }
 
   <!-- FORM -->
   <div id="formSection">
+
+    <!-- DADOS DO PERFIL -->
     <div class="card">
       <div class="row2">
         <div class="field">
@@ -201,17 +192,38 @@ select option { background: #120820; }
         </div>
       </div>
       <div class="field">
-        <label>Observações (opcional)</label>
+        <label>Observações <span class="optional-tag">(opcional)</span></label>
         <textarea id="obs" rows="2" placeholder="Ex: perfil novo, público feminino 25-40 anos..."></textarea>
       </div>
     </div>
 
+    <!-- DADOS DE CONTATO (LEAD) -->
+    <div class="card-lead">
+      <div class="card-lead-tag">Para receber sua análise</div>
+      <div class="row3" style="margin-top: 8px;">
+        <div class="field">
+          <label>Seu nome <span class="required-star">*</span></label>
+          <input type="text" id="nome" placeholder="Nome completo">
+        </div>
+        <div class="field">
+          <label>WhatsApp <span class="required-star">*</span></label>
+          <input type="tel" id="whatsapp" placeholder="(67) 99999-9999">
+        </div>
+        <div class="field">
+          <label>E-mail <span class="optional-tag">(opcional)</span></label>
+          <input type="email" id="email" placeholder="seuemail@gmail.com">
+        </div>
+      </div>
+      <p class="privacidade">Seus dados ficam só comigo. Sem spam, sem lista de transmissão sem autorização.</p>
+    </div>
+
+    <!-- PRINTS -->
     <div class="card">
-      <label>Prints do seu perfil (bio, feed, stories)</label>
+      <label>Prints do seu perfil <span class="optional-tag">(bio, feed, stories — até 5 imagens)</span></label>
       <div class="upload-area">
         <input type="file" id="fileInput" accept="image/*" multiple onchange="handleFiles(this.files)">
         <div class="upload-icon">📸</div>
-        <div class="upload-text"><strong>Toque para enviar os prints</strong><br>Bio, feed, stories — até 5 imagens</div>
+        <div class="upload-text"><strong>Toque para enviar os prints</strong><br>Quanto mais prints, mais precisa é a análise</div>
       </div>
       <div class="preview-grid" id="previewGrid"></div>
     </div>
@@ -231,7 +243,7 @@ select option { background: #120820; }
   <!-- LIMITE ATINGIDO -->
   <div id="limite">
     <div class="limite-box fade">
-      <div class="limite-icone">⏰</div>
+      <div style="font-size:48px;margin-bottom:16px;">⏰</div>
       <div class="limite-titulo">Você já utilizou sua análise gratuita hoje</div>
       <p class="limite-texto">O diagnóstico gratuito é limitado para garantir qualidade e personalização. Volte amanhã para analisar outro perfil — ou siga direto para o <strong style="color:#fff">Mapa Estratégico</strong>, onde a análise completa é entregue sem limites.</p>
     </div>
@@ -271,20 +283,17 @@ select option { background: #120820; }
       <p style="font-size:13px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:2px">Mapa Estratégico Instagram</p>
       <h2 style="font-family:'Playfair Display',serif;font-size:28px;margin-bottom:8px">Análise Completa Premium</h2>
       <p style="color:var(--muted);font-size:13px;margin-bottom:20px">Tudo que você precisa pra executar — sem precisar de mais ninguém</p>
-
       <div class="oferta-lista">
         <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>2 sugestões de bio prontas</strong> com a estrutura correta e explicação de por que cada uma funciona</span></div>
         <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>4 destaques estratégicos</strong> com nome, função e o que colocar em cada um</span></div>
         <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>3 tipos de conteúdo</strong> com o percentual certo no calendário</span></div>
-        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>8 ideias de conteúdo prontas</strong> com formato, descrição e frase de abertura pronta para gravar ou digitar</span></div>
-        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Como usar os stories</strong> (publicações que somem em 24h) de forma estratégica</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>8 ideias de conteúdo prontas</strong> com formato, descrição e frase de abertura pronta para gravar</span></div>
+        <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Como usar os stories</strong> de forma estratégica</span></div>
         <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>Plano de ação semana a semana</strong> priorizando o que gera mais resultado primeiro</span></div>
         <div class="oferta-item"><span class="oferta-check">✓</span><span><strong>PDF profissional</strong> para baixar e consultar quando quiser</span></div>
       </div>
-
       <div class="oferta-preco">R$19,90</div>
       <p style="color:var(--muted);font-size:12px;margin:8px 0 24px">pagamento único • acesso imediato</p>
-
       <button class="btn" onclick="comprar()">
         <span>⚡</span> Quero o Mapa Estratégico
       </button>
@@ -298,7 +307,6 @@ select option { background: #120820; }
     </div>
     <p style="font-size:11px;color:#3d2e55">Estratégia de Conteúdo para Instagram · 67 99839-0967</p>
   </div>
-
 </div>
 
 <script>
@@ -331,8 +339,15 @@ function handleFiles(files) {
 async function gerarDiagnostico() {
   const arroba = document.getElementById('arroba').value.trim();
   const nicho = document.getElementById('nicho').value.trim();
+  const nome = document.getElementById('nome').value.trim();
+  const whatsapp = document.getElementById('whatsapp').value.trim();
+
   if (!arroba || !nicho) {
     mostrarErro('Preencha pelo menos o @ e o nicho do perfil.');
+    return;
+  }
+  if (!nome || !whatsapp) {
+    mostrarErro('Preencha seu nome e WhatsApp para receber a análise.');
     return;
   }
 
@@ -345,7 +360,8 @@ async function gerarDiagnostico() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        arroba, nicho,
+        arroba, nicho, nome, whatsapp,
+        email: document.getElementById('email').value.trim(),
         seguidores: document.getElementById('seguidores').value,
         objetivo: document.getElementById('objetivo').value,
         obs: document.getElementById('obs').value,
@@ -354,9 +370,7 @@ async function gerarDiagnostico() {
         imagens: uploadedImages
       })
     });
-
     const data = await res.json();
-
     if (!data.success) {
       document.getElementById('loading').style.display = 'none';
       if (data.limite_atingido) {
@@ -368,10 +382,8 @@ async function gerarDiagnostico() {
       }
       return;
     }
-
     sessionId = data.session_id;
     renderDiagnostico(data.analise);
-
   } catch (e) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('formSection').style.display = 'block';
@@ -381,12 +393,10 @@ async function gerarDiagnostico() {
 
 function renderDiagnostico(a) {
   document.getElementById('loading').style.display = 'none';
-
   document.getElementById('percepcao').textContent = a.percepcao_inicial || '';
   document.getElementById('impacto').textContent = a.impacto || '';
   document.getElementById('gancho').textContent = a.frase_gancho ? `"${a.frase_gancho}"` : '';
 
-  // Oportunidade
   const oportunidadeEl = document.getElementById('oportunidade');
   const cardOport = document.getElementById('cardOportunidade');
   if (a.oportunidade) {
@@ -396,13 +406,11 @@ function renderDiagnostico(a) {
     cardOport.style.display = 'none';
   }
 
-  // Pontos fortes
   const pontosDiv = document.getElementById('pontos-fortes');
   pontosDiv.innerHTML = (a.pontos_fortes || []).map(p =>
     `<div class="ponto-forte-item">${p}</div>`
   ).join('');
 
-  // Problemas
   const probDiv = document.getElementById('problemas');
   probDiv.innerHTML = (a.problemas || []).map((p, i) =>
     `<div class="problema-item"><strong style="color:#FF29C0">Problema ${i+1}:</strong> ${p}</div>`
@@ -415,6 +423,14 @@ function renderDiagnostico(a) {
 }
 
 async function comprar() {
+  // Rastreia clique em comprar
+  if (sessionId) {
+    fetch(`${API_BASE}/api/registrar-interesse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    }).catch(() => {});
+  }
   try {
     const res = await fetch(`${API_BASE}/api/criar-pagamento`, {
       method: 'POST',
