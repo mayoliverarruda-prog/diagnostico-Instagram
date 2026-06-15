@@ -8,24 +8,185 @@ import os
 import re
 import uuid
 import traceback
+import sqlite3
+import hashlib
+import requests
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
 MP_ACCESS_TOKEN = os.environ.get("MP_ACCESS_TOKEN", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "")
+NOTION_DATABASE_ID = os.environ.get("NOTION_DATABASE_ID", "9685ee7d14a54dd78c635afa02e27d41")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "mayara2024")
 
 print(f"DEBUG INICIAL: MP_ACCESS_TOKEN presente: {bool(MP_ACCESS_TOKEN)}", flush=True)
 print(f"DEBUG INICIAL: ANTHROPIC_API_KEY presente: {bool(ANTHROPIC_API_KEY)}", flush=True)
+print(f"DEBUG INICIAL: NOTION_TOKEN presente: {bool(NOTION_TOKEN)}", flush=True)
 
 sdk = mercadopago.SDK(MP_ACCESS_TOKEN) if MP_ACCESS_TOKEN else None
-
-pagamentos_aprovados = set()
 analises_cache = {}
-
 LIMITE_DIARIO = 2
 usos_por_ip = {}
 
+# ─── BANCO DE DADOS SQLite ───────────────────────────────────────────────────
+
+DB_PATH = os.environ.get("DB_PATH", "leads.db")
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS leads (
+            id TEXT PRIMARY KEY,
+            nome TEXT,
+            whatsapp TEXT,
+            email TEXT,
+            arroba TEXT,
+            nicho TEXT,
+            seguidores TEXT,
+            objetivo TEXT,
+            loja_fisica TEXT,
+            cidade TEXT,
+            obs TEXT,
+            status TEXT DEFAULT 'Diagnóstico feito',
+            notion_page_id TEXT,
+            criado_em TEXT,
+            atualizado_em TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def salvar_lead(session_id, dados):
+    agora = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        INSERT OR REPLACE INTO leads
+        (id, nome, whatsapp, email, arroba, nicho, seguidores, objetivo, loja_fisica, cidade, obs, status, criado_em, atualizado_em)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Diagnóstico feito', ?, ?)
+    """, (
+        session_id,
+        dados.get('nome', ''),
+        dados.get('whatsapp', ''),
+        dados.get('email', ''),
+        dados.get('arroba', ''),
+        dados.get('nicho', ''),
+        dados.get('seguidores', ''),
+        dados.get('objetivo', ''),
+        dados.get('loja_fisica', ''),
+        dados.get('cidade', ''),
+        dados.get('obs', ''),
+        agora, agora
+    ))
+    conn.commit()
+    conn.close()
+
+def atualizar_status_lead(session_id, novo_status):
+    agora = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE leads SET status=?, atualizado_em=? WHERE id=?", (novo_status, agora, session_id))
+    conn.commit()
+    conn.close()
+    # Atualiza no Notion também
+    if NOTION_TOKEN:
+        conn2 = sqlite3.connect(DB_PATH)
+        c2 = conn2.cursor()
+        c2.execute("SELECT notion_page_id FROM leads WHERE id=?", (session_id,))
+        row = c2.fetchone()
+        conn2.close()
+        if row and row[0]:
+            atualizar_notion_status(row[0], novo_status)
+
+def salvar_notion_page_id(session_id, page_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE leads SET notion_page_id=? WHERE id=?", (page_id, session_id))
+    conn.commit()
+    conn.close()
+
+def listar_leads():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM leads ORDER BY criado_em DESC")
+    rows = [dict(r) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+# ─── INTEGRAÇÃO NOTION ───────────────────────────────────────────────────────
+
+def enviar_para_notion(session_id, dados):
+    if not NOTION_TOKEN:
+        return None
+    try:
+        objetivo_map = {
+            'vendas': 'Gerar vendas',
+            'autoridade': 'Construir autoridade',
+            'crescimento': 'Crescer seguidores',
+            'marca_pessoal': 'Marca pessoal'
+        }
+        loja_map = {
+            'nao': 'Não',
+            'sim': 'Sim',
+            'hibrido': 'Física + online'
+        }
+        payload = {
+            "parent": {"database_id": NOTION_DATABASE_ID},
+            "properties": {
+                "Nome": {"title": [{"text": {"content": dados.get('nome', 'Sem nome')}}]},
+                "WhatsApp": {"phone_number": dados.get('whatsapp', '')},
+                "Email": {"email": dados.get('email') or None},
+                "Perfil @": {"rich_text": [{"text": {"content": dados.get('arroba', '')}}]},
+                "Nicho": {"rich_text": [{"text": {"content": dados.get('nicho', '')}}]},
+                "Seguidores": {"rich_text": [{"text": {"content": dados.get('seguidores', '')}}]},
+                "Objetivo": {"select": {"name": objetivo_map.get(dados.get('objetivo', ''), 'Gerar vendas')}},
+                "Status": {"select": {"name": "Diagnóstico feito"}},
+                "Loja física": {"select": {"name": loja_map.get(dados.get('loja_fisica', 'nao'), 'Não')}},
+                "Cidade": {"rich_text": [{"text": {"content": dados.get('cidade', '')}}]}
+            }
+        }
+        # Remove email se vazio
+        if not dados.get('email'):
+            del payload['properties']['Email']
+
+        headers = {
+            "Authorization": f"Bearer {NOTION_TOKEN}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28"
+        }
+        resp = requests.post("https://api.notion.com/v1/pages", json=payload, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            page_id = resp.json().get('id')
+            salvar_notion_page_id(session_id, page_id)
+            return page_id
+        else:
+            print(f"ERRO Notion: {resp.status_code} {resp.text[:200]}", flush=True)
+            return None
+    except Exception as e:
+        print(f"ERRO enviar_para_notion: {e}", flush=True)
+        return None
+
+def atualizar_notion_status(page_id, novo_status):
+    if not NOTION_TOKEN or not page_id:
+        return
+    try:
+        headers = {
+            "Authorization": f"Bearer {NOTION_TOKEN}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28"
+        }
+        payload = {"properties": {"Status": {"select": {"name": novo_status}}}}
+        requests.patch(f"https://api.notion.com/v1/pages/{page_id}", json=payload, headers=headers, timeout=10)
+    except Exception as e:
+        print(f"ERRO atualizar_notion_status: {e}", flush=True)
+
+# ─── UTILITÁRIOS ─────────────────────────────────────────────────────────────
 
 def get_client_ip():
     forwarded = request.headers.get('X-Forwarded-For', '')
@@ -33,14 +194,12 @@ def get_client_ip():
         return forwarded.split(',')[0].strip()
     return request.remote_addr or 'desconhecido'
 
-
 def verifica_limite_grauito(ip):
     hoje = datetime.utcnow().strftime('%Y-%m-%d')
     registro = usos_por_ip.get(ip)
     if not registro or registro.get('data') != hoje:
         return True
     return registro.get('count', 0) < LIMITE_DIARIO
-
 
 def registra_uso_gratuito(ip):
     hoje = datetime.utcnow().strftime('%Y-%m-%d')
@@ -50,7 +209,6 @@ def registra_uso_gratuito(ip):
     else:
         usos_por_ip[ip]['count'] = registro.get('count', 0) + 1
 
-
 def get_base_url():
     proto = request.headers.get('X-Forwarded-Proto', 'https')
     host = request.headers.get('X-Forwarded-Host') or request.host
@@ -58,18 +216,15 @@ def get_base_url():
         proto = 'https'
     return f"{proto}://{host}"
 
-
 def get_contexto_sazonal():
     hoje = datetime.utcnow()
     mes = hoje.month
     dia = hoje.day
-
     def dias_ate(m, d):
         alvo = datetime(hoje.year, m, d)
         if alvo < hoje:
             alvo = datetime(hoje.year + 1, m, d)
         return (alvo - hoje).days
-
     proximas = [
         (dias_ate(2, 14), "Dia dos Namorados (14 de fevereiro)"),
         (dias_ate(3, 8), "Dia da Mulher (8 de marco)"),
@@ -81,9 +236,7 @@ def get_contexto_sazonal():
         (dias_ate(12, 25), "Natal (25 de dezembro)"),
         (dias_ate(1, 1), "Ano Novo (1 de janeiro)"),
     ]
-
     datas_proximas = [(dias, nome) for dias, nome in proximas if dias <= 45]
-
     if mes in [12, 1, 2]:
         estacao = "verao no Brasil"
     elif mes in [3, 4, 5]:
@@ -92,13 +245,11 @@ def get_contexto_sazonal():
         estacao = "inverno no Brasil"
     else:
         estacao = "primavera no Brasil"
-
     meses_pt = {
         1: "janeiro", 2: "fevereiro", 3: "marco", 4: "abril",
         5: "maio", 6: "junho", 7: "julho", 8: "agosto",
         9: "setembro", 10: "outubro", 11: "novembro", 12: "dezembro"
     }
-
     texto = f"Hoje e {dia} de {meses_pt[mes]} de {hoje.year}. Estacao atual: {estacao}."
     if datas_proximas:
         urgencias = []
@@ -112,9 +263,7 @@ def get_contexto_sazonal():
         texto += f" Datas importantes nos proximos 45 dias: {'; '.join(urgencias)}."
     else:
         texto += " Nenhuma data comemorativa grande nos proximos 45 dias — foco em crescimento organico."
-
     return texto
-
 
 def fechar_chaves_truncadas(s):
     abertas_chave = 0
@@ -147,7 +296,6 @@ def fechar_chaves_truncadas(s):
     s += '}' * max(0, abertas_chave)
     return s
 
-
 def consertar_virgulas_faltantes(s):
     s = re.sub(r'"\s*\n\s*"([a-zA-Z_])', r'",\n"\1', s)
     s = re.sub(r'}\s*\n\s*{', r'},\n{', s)
@@ -157,7 +305,6 @@ def consertar_virgulas_faltantes(s):
     s = re.sub(r'}\s*\n\s*"([a-zA-Z_])', r'},\n"\1', s)
     return s
 
-
 def parsear_json_da_ia(raw):
     if not raw:
         raise ValueError("Resposta vazia da IA")
@@ -166,42 +313,35 @@ def parsear_json_da_ia(raw):
         raise ValueError("JSON nao encontrado na resposta da IA")
     end = raw.rfind('}') + 1
     candidato = raw[start:end] if end > start else raw[start:]
-
     try:
         return json.loads(candidato)
     except json.JSONDecodeError:
         pass
-
     limpo = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', candidato)
     try:
         return json.loads(limpo)
     except json.JSONDecodeError:
         pass
-
     limpo3 = re.sub(r',(\s*[}\]])', r'\1', limpo)
     try:
         return json.loads(limpo3)
     except json.JSONDecodeError:
         pass
-
     limpo4 = consertar_virgulas_faltantes(limpo3)
     try:
         return json.loads(limpo4)
     except json.JSONDecodeError:
         pass
-
     limpo5 = fechar_chaves_truncadas(limpo4)
     try:
         return json.loads(limpo5)
     except json.JSONDecodeError:
         pass
-
     limpo6 = fechar_chaves_truncadas(consertar_virgulas_faltantes(limpo))
     try:
         return json.loads(limpo6)
     except json.JSONDecodeError as e:
         raise ValueError(f"JSON invalido apos tentativas: {str(e)[:200]}")
-
 
 def chamar_ia_com_retry(client, modelo, system_prompt, content, max_tokens, max_tentativas=3):
     ultima_excecao = None
@@ -209,7 +349,7 @@ def chamar_ia_com_retry(client, modelo, system_prompt, content, max_tokens, max_
         try:
             extra = ""
             if tentativa > 0:
-                extra = "\n\nATENCAO: tentativa anterior falhou. Gere JSON estritamente valido. Virgulas no lugar. Aspas duplas em tudo. Feche todas as chaves e colchetes. NAO use quebra de linha dentro de strings."
+                extra = "\n\nATENCAO: tentativa anterior falhou. Gere JSON estritamente valido."
             response = client.messages.create(
                 model=modelo,
                 max_tokens=max_tokens,
@@ -227,9 +367,9 @@ def chamar_ia_com_retry(client, modelo, system_prompt, content, max_tokens, max_
             continue
     raise ultima_excecao or ValueError("Todas as tentativas falharam")
 
+# ─── SYSTEM PROMPTS ───────────────────────────────────────────────────────────
 
 SYSTEM_DIAGNOSTICO = """Voce e uma especialista em distribuicao algoritmica do Instagram e consultora estrategica de negocios digitais. Sua funcao e fazer um diagnostico REAL e PROFUNDO — como um medico que respeita o paciente mas nao esconde o que encontrou.
-
 REGRA DE LINGUAGEM — OBRIGATORIA:
 Quando usar um termo tecnico, SEMPRE explique entre parenteses logo depois.
 Exemplos obrigatorios:
@@ -243,172 +383,64 @@ Exemplos obrigatorios:
 - feed (a grade de fotos e videos que aparecem no seu perfil)
 - destaques (as bolhas fixas que ficam logo abaixo da bio)
 - nicho (o tema principal ou segmento de mercado do seu perfil)
-
 PRINCIPIOS INEGOCIAVEIS:
-
 1. SEJA ESPECIFICA AO PONTO DE DOER
 Cite o texto exato da bio. O nome dos destaques. O tema dos posts visiveis. A cor do feed. O numero de seguidores em relacao aos posts.
 Se nao consegue ser especifica sobre aquele perfil, nao escreve.
 Nunca escreva algo que poderia ser dito sobre qualquer perfil.
-
 2. DIAGNOSTICO REAL, NAO RELATORIO EDUCADO
 Se o perfil tem um problema serio, diga. Com clareza. Sem suavizar.
 Se algo funciona de verdade, reconheca. Sem elogiar por educacao.
 Tom de medico — firme, claro, respeitoso. Nunca cruel ou humilhante.
-Nivel de honestidade que buscamos: "Voce vende estrategia mas seu proprio feed prova que nao tem uma."
-
-3. ANALISE COMO CONSULTOR ESTRATEGICO — va alem do obvio:
-- Filtre o que parece problema mas nao e, e identifique o que parece ok mas e o problema real
-- Identifique pontos cegos: o que o dono do perfil provavelmente acredita que esta funcionando mas nao esta
-- Identifique suposicoes ocultas: o que precisaria ser verdade para a estrategia atual funcionar?
-- Identifique alavancagem: onde uma pequena mudanca geraria o maior resultado possivel?
-- Pense contra o senso comum: existe algo que vai contra o que todo mundo fala sobre Instagram mas que e verdade para esse perfil especifico?
-
-4. ANALISE OBRIGATORIA DA BIO — verifique e comente sobre:
-- O campo NOME (que aparece em negrito): tem a palavra-chave (keyword) principal do negocio ou e so o nome pessoal?
-- O @ do perfil: reforca o posicionamento ou e generico/pessoal demais?
-- A estrutura da bio: segue a ordem correta? (1. o que resolve, 2. para quem, 3. como ou diferencial, 4. CTA — chamada para acao, 5. cidade se for negocio local)
-- O CTA (chamada para acao): existe? E claro? A pessoa sabe exatamente o que fazer depois de ler a bio?
-- Palavras desperdicadas: a bio repete informacoes que ja estao no @ ou no nome? Usa espaco com frases que nao convencem?
-
-5. ANALISE OBRIGATORIA DOS DESTAQUES:
-- Existem destaques? Se nao existem, diga explicitamente — isso e um problema.
-- Os nomes dos destaques fazem sentido para alguem que nunca viu o perfil?
-- Estao organizados para guiar o visitante (gerar confianca, mostrar servicos, responder duvidas) ou sao uma colecao aleatoria?
-- Falta algum destaque essencial para o nicho desse perfil?
-
-6. ANALISE OBRIGATORIA DA RELACAO SEGUIDORES x POSTS:
-- Quantos posts em relacao ao numero de seguidores? O perfil e novo, estagnado ou em crescimento?
-- A frequencia de postagem e compativel com o objetivo declarado?
-- Existe algum padrao que explica por que o perfil esta no nivel de seguidores que esta?
-
-7. ANALISE DO ALCANCE PARA NAO-SEGUIDORES:
-- O conteudo visivel tem potencial de chegar em quem ainda nao segue o perfil?
-- Os videos tem ganchos (primeiros 3 segundos) que parariam o scroll de um estranho?
-- O feed convida um visitante novo a seguir ou apenas confirma algo para quem ja segue?
-
-8. SAZONALIDADE COM URGENCIA:
-Se ha uma data comercial relevante nos proximos 45 dias e o perfil nao se preparou, diga com urgencia real.
-Exemplo: "O Dia das Maes e em 12 dias e o perfil ainda nao fez nenhum post sobre o tema — cada dia perdido agora e alcance que nao volta."
-
-SAZONALIDADE — use com urgencia quando relevante:
+3. ANALISE COMO CONSULTOR ESTRATEGICO — va alem do obvio.
+4. ANALISE OBRIGATORIA DA BIO, DESTAQUES, RELACAO SEGUIDORES x POSTS, ALCANCE PARA NAO-SEGUIDORES.
+5. SAZONALIDADE COM URGENCIA quando relevante.
+SAZONALIDADE:
 __CONTEXTO_SAZONAL__
-
 PROIBIDO:
 - Frases que qualquer IA usaria sobre qualquer perfil
 - Elogios por cortesia
 - Tom de coach motivacional
-- Suavizar problemas reais
-
 ESTRUTURA OBRIGATORIA — 6 campos JSON:
-
-1. percepcao_inicial: O que um visitante desconhecido le e sente nos primeiros 3 segundos. Cite o texto real da bio, os nomes dos destaques, o que o feed transmite. Inclua observacao sobre a relacao seguidores x quantidade de posts e o que isso revela sobre o estagio do perfil.
-
-2. pontos_fortes: Lista com 3 itens. So entra o que REALMENTE funciona. Seja especifica — cite o elemento real. Nao elogie o que e obrigacao basica.
-
-3. problemas: Lista com 3 itens. Formato: [o que foi observado especificamente no perfil] + [mecanismo — como isso prejudica o crescimento ou as vendas] + [ponto cego ou suposicao oculta por tras do problema, se houver]. Cite a bio, os destaques, os posts especificos. NAO entregue solucao ainda.
-
-4. impacto: 1 paragrafo (3 a 5 linhas). O que esses problemas estao impedindo concretamente NESTE perfil. Identifique o maior ponto de alavancagem — onde uma mudanca geraria o maior resultado. Pode ser direto e desconfortavel. O objetivo e a pessoa sentir urgencia de resolver.
-
-5. oportunidade: 1 a 2 frases. Uma oportunidade real que existe AGORA — considerando o nicho, o mes e as datas proximas. Se ha data importante chegando e o perfil nao se preparou, diga com urgencia.
-
-6. frase_gancho: 1 frase que resume o estado atual do perfil de forma honesta e memoravel. Deve fazer a pessoa pensar "e exatamente isso." Nao pode ser generica. Nivel certo: "O perfil tem presenca mas nao tem direcao — o visitante sai sem entender exatamente o que voce resolve."
-
+1. percepcao_inicial: O que um visitante desconhecido le e sente nos primeiros 3 segundos.
+2. pontos_fortes: Lista com 3 itens. So entra o que REALMENTE funciona.
+3. problemas: Lista com 3 itens. Formato: [o que foi observado] + [mecanismo] + [ponto cego].
+4. impacto: 1 paragrafo (3 a 5 linhas). O que esses problemas estao impedindo concretamente.
+5. oportunidade: 1 a 2 frases. Uma oportunidade real que existe AGORA.
+6. frase_gancho: 1 frase que resume o estado atual do perfil de forma honesta e memoravel.
 REGRAS DO JSON:
 Apenas JSON valido, sem markdown, sem backticks. Aspas duplas. Virgula apos cada item exceto o ultimo. NAO use quebra de linha dentro de strings.
-
 Formato exato:
 {"percepcao_inicial": "...", "pontos_fortes": ["...", "...", "..."], "problemas": ["...", "...", "..."], "impacto": "...", "oportunidade": "...", "frase_gancho": "..."}"""
 
-
 SYSTEM_COMPLETO = """Voce e uma especialista em distribuicao algoritmica do Instagram e consultora estrategica de negocios digitais. Agora entregue a ANALISE COMPLETA com solucoes prontas para executar — nao sugestoes, nao direcoes. Solucoes prontas.
-
 REGRA DE LINGUAGEM — OBRIGATORIA:
 Quando usar um termo tecnico, SEMPRE explique entre parenteses logo depois.
-- keyword (palavra-chave que as pessoas usam para te encontrar)
-- CTA (chamada para acao — o que voce pede para a pessoa fazer)
-- gancho (os primeiros 3 segundos do video que prendem quem esta passando)
-- SEO (palavras que ajudam o Instagram a entender sobre o que e seu perfil)
-- alcance organico (pessoas que viram seu conteudo sem voce pagar)
-- engajamento (curtidas, comentarios, salvamentos, compartilhamentos)
-
 PRINCIPIOS:
 - Portugues direto e simples.
-- Escreva a bio — nao diga como melhorar. Escreva ela pronta, com a estrutura correta: (1) o que resolve, (2) para quem, (3) como ou diferencial, (4) CTA claro, (5) cidade se for negocio local.
-- Escreva a frase de abertura do video — pronta para gravar. Nao um modelo.
+- Escreva a bio — nao diga como melhorar. Escreva ela pronta.
+- Escreva a frase de abertura do video — pronta para gravar.
 - Tudo especifico para esse perfil. Zero de resposta generica.
-- Nos destaques: pense como um visitante que nunca viu esse perfil. O que ele precisa encontrar para confiar e agir?
-- Nos pilares: considere o estagio do perfil (iniciante, crescimento, consolidado) e o objetivo.
-- No plano de acao: identifique os 3 pontos de alavancagem — onde uma pequena acao gera grande resultado — e priorize esses primeiro.
-- Considere o nicho, o numero de seguidores, o objetivo e a sazonalidade.
-
-SAZONALIDADE — considere nas ideias e no plano de acao:
+SAZONALIDADE:
 __CONTEXTO_SAZONAL__
-
 ESTRUTURA OBRIGATORIA:
-
 {
-  "bio_sugestao_1": {
-    "tipo": "Autoridade",
-    "texto": "bio completa pronta — estrutura: o que resolve + para quem + diferencial + CTA (chamada para acao) + cidade se local. Com emojis e palavras-chave (keywords) do nicho.",
-    "porque": "2 linhas explicando por que essa bio funciona para esse perfil especifico — mencione qual keyword (palavra-chave) foi usada e por que o CTA (chamada para acao) escolhido converte"
-  },
-  "bio_sugestao_2": {
-    "tipo": "Beneficio direto",
-    "texto": "bio completa com angulo diferente — foca no resultado que o cliente obtem, nao em quem e a dona do perfil. Estrutura diferente da primeira.",
-    "porque": "2 linhas com logica diferente — explique o angulo escolhido e por que funciona para esse publico especifico"
-  },
-  "destaques_estrategicos": [
-    {
-      "nome": "nome curto (max 10 letras, como aparece no Instagram)",
-      "funcao": "papel especifico na jornada do visitante: gerar confianca, mostrar servicos, responder objecoes, apresentar resultados",
-      "conteudo": "o que entra dentro — especifico e executavel para esse nicho"
-    }
-  ],
-  "pilares_conteudo": [
-    {
-      "nome": "nome do pilar",
-      "percentual": "X% do conteudo",
-      "justificativa": "por que esse percentual faz sentido para esse perfil especifico agora — considere o estagio e o objetivo"
-    }
-  ],
-  "ideias_conteudo": [
-    {
-      "titulo": "titulo especifico — nao generico",
-      "formato": "Video curto | Carrossel | Story",
-      "objetivo": "Alcance | Autoridade | Conexao | Venda",
-      "descricao": "o que mostrar ou falar — executavel, especifico para esse nicho e estagio do perfil",
-      "frase_abertura": "FRASE LITERAL para comecar — pronta para gravar ou digitar. Este e o gancho (os primeiros 3 segundos que prendem quem esta passando). Nao um modelo — a frase real."
-    }
-  ],
-  "dicas_stories": [
-    "dica especifica e executavel de como usar os stories (publicacoes que somem em 24 horas) para esse perfil e nicho"
-  ],
-  "plano_acao": [
-    {
-      "semana": "Semana 1",
-      "acao": "acao especifica com verbo + o que fazer + onde fazer — priorize os pontos de alavancagem (onde pequenas acoes geram grandes resultados)",
-      "impacto": "alto | medio | baixo"
-    }
-  ]
+  "bio_sugestao_1": {"tipo": "Autoridade", "texto": "bio completa pronta", "porque": "2 linhas explicando"},
+  "bio_sugestao_2": {"tipo": "Beneficio direto", "texto": "bio completa com angulo diferente", "porque": "2 linhas"},
+  "destaques_estrategicos": [{"nome": "nome curto", "funcao": "papel na jornada", "conteudo": "o que entra"}],
+  "pilares_conteudo": [{"nome": "nome", "percentual": "X%", "justificativa": "por que"}],
+  "ideias_conteudo": [{"titulo": "titulo", "formato": "Video curto | Carrossel | Story", "objetivo": "Alcance | Autoridade | Conexao | Venda", "descricao": "o que mostrar", "frase_abertura": "frase literal pronta"}],
+  "dicas_stories": ["dica especifica"],
+  "plano_acao": [{"semana": "Semana 1", "acao": "acao especifica", "impacto": "alto | medio | baixo"}]
 }
+QUANTIDADES: 2 bios, 4 destaques, 3 pilares, 8 ideias (3+ com objetivo Alcance), 5-7 dicas stories, 4 semanas plano.
+REGRAS DO JSON: Apenas JSON valido, sem markdown, sem backticks. Aspas duplas. NAO use quebra de linha dentro de strings."""
 
-QUANTIDADES OBRIGATORIAS:
-- 2 sugestoes de bio com estrutura correta e explicita
-- 4 destaques estrategicos
-- 3 pilares com percentual
-- 8 ideias de conteudo, pelo menos 3 com objetivo Alcance
-- 5 a 7 dicas de stories
-- 4 semanas no plano de acao, priorizando pontos de alavancagem na semana 1
-
-REGRAS DO JSON:
-Apenas JSON valido, sem markdown, sem backticks. Aspas duplas. Virgula apos cada item exceto o ultimo. NAO use quebra de linha dentro de strings."""
-
+# ─── ROTAS PRINCIPAIS ─────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
-
 
 @app.route('/api/diagnostico', methods=['POST'])
 def gerar_diagnostico():
@@ -423,6 +455,9 @@ def gerar_diagnostico():
         data = request.json
         arroba = data.get('arroba', '')
         nicho = data.get('nicho', '')
+        nome = data.get('nome', '')
+        whatsapp = data.get('whatsapp', '')
+        email = data.get('email', '')
         seguidores = data.get('seguidores', '')
         objetivo = data.get('objetivo', '')
         obs = data.get('obs', '')
@@ -435,6 +470,7 @@ def gerar_diagnostico():
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         content = []
+
         for img_data in imagens[:5]:
             if ',' in img_data:
                 header, b64 = img_data.split(',', 1)
@@ -450,14 +486,11 @@ def gerar_diagnostico():
         contexto = f"""Perfil analisado: {arroba}
 Nicho ou segmento: {nicho}
 Numero de seguidores: {seguidores}
-Numero de posts (se visivel nas imagens, extraia das imagens): analise a relacao seguidores x posts
 Objetivo do dono: {objetivo}
 Tem loja fisica: {loja_fisica}
 Cidade (se loja fisica): {cidade}
 Observacoes do dono: {obs}
-
-Analise as imagens com profundidade de consultora estrategica. Seja especifica. Cite elementos reais do perfil. Va alem do obvio. Identifique pontos cegos, suposicoes ocultas e pontos de alavancagem."""
-
+Analise as imagens com profundidade de consultora estrategica. Seja especifica. Cite elementos reais do perfil."""
         content.append({"type": "text", "text": contexto})
 
         analise = chamar_ia_com_retry(
@@ -472,10 +505,26 @@ Analise as imagens com profundidade de consultora estrategica. Seja especifica. 
         registra_uso_gratuito(ip)
 
         session_id = str(uuid.uuid4())
+
+        # Salva lead no banco
+        dados_lead = {
+            'nome': nome, 'whatsapp': whatsapp, 'email': email,
+            'arroba': arroba, 'nicho': nicho, 'seguidores': seguidores,
+            'objetivo': objetivo, 'loja_fisica': loja_fisica, 'cidade': cidade, 'obs': obs
+        }
+        salvar_lead(session_id, dados_lead)
+
+        # Envia para Notion em background (não bloqueia a resposta)
+        try:
+            enviar_para_notion(session_id, dados_lead)
+        except Exception as e:
+            print(f"AVISO: falha ao enviar para Notion: {e}", flush=True)
+
         analises_cache[session_id] = {
             'arroba': arroba, 'nicho': nicho, 'seguidores': seguidores,
             'objetivo': objetivo, 'obs': obs, 'loja_fisica': loja_fisica,
-            'cidade': cidade, 'imagens': imagens, 'diagnostico': analise
+            'cidade': cidade, 'imagens': imagens, 'diagnostico': analise,
+            'nome': nome, 'whatsapp': whatsapp, 'email': email
         }
 
         return jsonify({'success': True, 'analise': analise, 'session_id': session_id})
@@ -485,6 +534,17 @@ Analise as imagens com profundidade de consultora estrategica. Seja especifica. 
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/registrar-interesse', methods=['POST'])
+def registrar_interesse():
+    """Chamado quando o lead clica no botão de comprar."""
+    try:
+        data = request.json
+        session_id = data.get('session_id')
+        if session_id:
+            atualizar_status_lead(session_id, 'Clicou em comprar')
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False}), 500
 
 @app.route('/api/criar-pagamento', methods=['POST'])
 def criar_pagamento():
@@ -537,7 +597,6 @@ def criar_pagamento():
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-
 @app.route('/api/webhook', methods=['POST'])
 def webhook():
     try:
@@ -546,11 +605,11 @@ def webhook():
             payment_id = data['data']['id']
             payment_info = sdk.payment().get(payment_id)
             if payment_info['response']['status'] == 'approved':
-                pagamentos_aprovados.add(payment_info['response']['external_reference'])
+                ref = payment_info['response']['external_reference']
+                atualizar_status_lead(ref, 'Pagou')
     except Exception as e:
         print(f"ERRO webhook: {e}", flush=True)
     return jsonify({'status': 'ok'})
-
 
 @app.route('/api/verificar-pagamento', methods=['POST'])
 def verificar_pagamento():
@@ -563,21 +622,27 @@ def verificar_pagamento():
             payment_info = sdk.payment().get(payment_id)
             if payment_info['response']['status'] == 'approved':
                 ref = payment_info['response'].get('external_reference', session_id)
-                pagamentos_aprovados.add(ref)
+                atualizar_status_lead(ref, 'Pagou')
                 return jsonify({'aprovado': True, 'session_id': ref})
         except Exception:
             pass
 
-    return jsonify({'aprovado': session_id in pagamentos_aprovados})
-
+    # Verifica no banco
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT status FROM leads WHERE id=?", (session_id,))
+    row = c.fetchone()
+    conn.close()
+    aprovado = row and row[0] == 'Pagou'
+    return jsonify({'aprovado': aprovado})
 
 @app.route('/api/analise-completa', methods=['POST'])
 def analise_completa():
     try:
         data = request.json
         session_id = data.get('session_id')
-
         sessao = analises_cache.get(session_id)
+
         if not sessao:
             return jsonify({'success': False, 'error': 'Sessao nao encontrada'}), 404
 
@@ -607,15 +672,11 @@ Objetivo: {sessao['objetivo']}
 Tem loja fisica: {sessao.get('loja_fisica', 'nao informado')}
 Cidade: {sessao.get('cidade', '')}
 Observacoes: {sessao['obs']}
-
 Problemas encontrados no diagnostico:
 {json.dumps(diag.get('problemas', []), ensure_ascii=False, indent=2)}
-
 Pontos positivos ja identificados:
 {json.dumps(diag.get('pontos_fortes', []), ensure_ascii=False, indent=2)}
-
-Agora entregue a analise completa com todas as solucoes prontas. Tudo especifico para esse perfil. Priorize os pontos de alavancagem no plano de acao."""
-
+Agora entregue a analise completa com todas as solucoes prontas."""
         content.append({"type": "text", "text": contexto})
 
         resultado = chamar_ia_com_retry(
@@ -626,6 +687,9 @@ Agora entregue a analise completa com todas as solucoes prontas. Tudo especifico
             max_tokens=6000,
             max_tentativas=3
         )
+
+        # Marca como pago no banco
+        atualizar_status_lead(session_id, 'Pagou')
 
         return jsonify({
             'success': True, 'diagnostico': diag,
@@ -639,6 +703,81 @@ Agora entregue a analise completa com todas as solucoes prontas. Tudo especifico
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ─── PAINEL ADMIN ─────────────────────────────────────────────────────────────
+
+def check_admin(req):
+    senha = req.headers.get('X-Admin-Password') or req.args.get('senha') or (req.json or {}).get('senha', '')
+    return senha == ADMIN_PASSWORD
+
+@app.route('/admin')
+def admin_page():
+    if not check_admin(request):
+        return """<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Admin</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#0A0414;color:#F5F3FF;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.box{background:#120820;border:1px solid #2a1545;border-radius:14px;padding:40px;width:340px;text-align:center}
+h2{font-size:22px;margin-bottom:8px}p{color:#7b6a9a;font-size:13px;margin-bottom:24px}
+input{width:100%;background:#1a0d2e;border:1px solid #2a1545;border-radius:8px;padding:12px;color:#F5F3FF;font-size:14px;margin-bottom:12px;outline:none}
+button{width:100%;padding:14px;background:linear-gradient(135deg,#B026FF,#FF29C0);border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer}
+</style></head><body><div class="box"><h2>Painel Admin</h2><p>Mayara Arruda — Mapa Estratégico</p>
+<input type="password" id="s" placeholder="Senha"><button onclick="window.location='/admin?senha='+document.getElementById('s').value">Entrar</button></div></body></html>""", 200
+
+    leads = listar_leads()
+
+    total = len(leads)
+    pagaram = sum(1 for l in leads if l['status'] == 'Pagou')
+    clicaram = sum(1 for l in leads if l['status'] == 'Clicou em comprar')
+    so_diagnostico = sum(1 for l in leads if l['status'] == 'Diagnóstico feito')
+    receita = pagaram * 19.90
+
+    linhas = ""
+    for l in leads:
+        status_cor = {'Pagou': '#00d68f', 'Clicou em comprar': '#FFB347', 'Diagnóstico feito': '#7b6a9a'}.get(l['status'], '#7b6a9a')
+        wpp = l.get('whatsapp', '').replace(' ', '').replace('(', '').replace(')', '').replace('-', '')
+        wpp_link = f'<a href="https://wa.me/55{wpp}" target="_blank" style="color:#B026FF">{l.get("whatsapp","—")}</a>' if wpp else '—'
+        data_fmt = l.get('criado_em', '')[:16].replace('T', ' ') if l.get('criado_em') else '—'
+        linhas += f"""<tr>
+<td>{l.get('nome','—')}</td>
+<td>{wpp_link}</td>
+<td style="color:#7b6a9a;font-size:12px">{l.get('email','—')}</td>
+<td>{l.get('arroba','—')}</td>
+<td>{l.get('nicho','—')}</td>
+<td><span style="color:{status_cor};font-weight:700;font-size:12px">{l.get('status','—')}</span></td>
+<td style="color:#7b6a9a;font-size:12px">{data_fmt}</td>
+</tr>"""
+
+    return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Admin — Leads</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0A0414;color:#F5F3FF;font-family:'Segoe UI',sans-serif;padding:32px 20px}}
+h1{{font-size:24px;margin-bottom:4px}}
+.sub{{color:#7b6a9a;font-size:13px;margin-bottom:28px}}
+.stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:28px}}
+.stat{{background:#120820;border:1px solid #2a1545;border-radius:12px;padding:20px;text-align:center}}
+.stat-n{{font-size:32px;font-weight:800;color:#B026FF}}
+.stat-l{{font-size:11px;color:#7b6a9a;text-transform:uppercase;letter-spacing:1.5px;margin-top:4px}}
+.stat-n.green{{color:#00d68f}}.stat-n.orange{{color:#FFB347}}.stat-n.receita{{color:#FF29C0}}
+table{{width:100%;border-collapse:collapse;background:#120820;border:1px solid #2a1545;border-radius:12px;overflow:hidden}}
+th{{background:#1a0d2e;padding:12px 14px;text-align:left;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#7b6a9a}}
+td{{padding:12px 14px;font-size:13px;border-bottom:1px solid #1a0d2e}}
+tr:last-child td{{border-bottom:none}}
+tr:hover td{{background:rgba(176,38,255,.04)}}
+</style></head><body>
+<h1>Painel de Leads</h1>
+<p class="sub">Mapa Estratégico Instagram — Mayara Arruda</p>
+<div class="stats">
+  <div class="stat"><div class="stat-n">{total}</div><div class="stat-l">Total de leads</div></div>
+  <div class="stat"><div class="stat-n">{so_diagnostico}</div><div class="stat-l">Só diagnóstico</div></div>
+  <div class="stat"><div class="stat-n orange">{clicaram}</div><div class="stat-l">Clicaram em comprar</div></div>
+  <div class="stat"><div class="stat-n green">{pagaram}</div><div class="stat-l">Pagaram</div></div>
+  <div class="stat"><div class="stat-n receita">R${receita:.2f}</div><div class="stat-l">Receita total</div></div>
+</div>
+<table>
+<thead><tr><th>Nome</th><th>WhatsApp</th><th>E-mail</th><th>@perfil</th><th>Nicho</th><th>Status</th><th>Data</th></tr></thead>
+<tbody>{linhas}</tbody>
+</table>
+</body></html>"""
+
+# ─── PÁGINAS DE RETORNO (PAGAMENTO) ──────────────────────────────────────────
 
 PAGINA_BASE = """<!DOCTYPE html>
 <html lang="pt-BR">
@@ -725,10 +864,8 @@ __CONTEUDO__
 </body>
 </html>"""
 
-
 def render_pagina(titulo, conteudo):
     return PAGINA_BASE.replace("__TITULO__", titulo).replace("__CONTEUDO__", conteudo)
-
 
 @app.route('/sucesso')
 def pagina_sucesso():
@@ -743,7 +880,6 @@ def pagina_sucesso():
 <script>
 const sessionId = '__SESSION__';
 const HOJE = new Date().toLocaleDateString('pt-BR', {day:'2-digit',month:'long',year:'numeric'});
-
 async function carregar() {
   if (!sessionId) {
     document.getElementById('conteudo').innerHTML = '<div class="card"><p>Sessao nao identificada. Volte ao site e refaca a analise.</p></div>';
@@ -762,67 +898,40 @@ async function carregar() {
       '<div class="card"><p>Nao foi possivel carregar sua analise: ' + e.message + '</p><p style="margin-top:12px;font-size:13px;">Seu pagamento foi aprovado. Atualize a pagina ou fale com Mayara: <strong>67 99839-0967</strong></p></div>';
   }
 }
-
 function renderizar(dados) {
   const d = dados.diagnostico || {};
   const a = dados.analise_completa || {};
   const arroba = dados.arroba || '';
-
   const capa = '<div class="capa"><div class="capa-logo">MA</div><div class="capa-marca">Mayara Arruda - Estrategia de Conteudo</div><div class="capa-produto">Mapa Estrategico <em>Instagram</em></div><div class="capa-perfil">Analise de ' + arroba + '</div><div class="capa-data">' + HOJE + '</div><div class="capa-by">Documento confidencial - <strong>Mayara Arruda</strong></div></div>';
-
   const pontos = (d.pontos_fortes||[]).map(p=>'<div class="ponto-forte-item">'+p+'</div>').join('');
   const problemas = (d.problemas||[]).map((p,i)=>'<div class="problema-item"><strong style="color:#FF29C0">Problema '+(i+1)+':</strong> '+p+'</div>').join('');
-
   const bio1 = a.bio_sugestao_1||{};
   const bio2 = a.bio_sugestao_2||{};
   const bios =
     '<div class="bio-box"><span class="bio-tipo">Opcao 1 - '+(bio1.tipo||'Autoridade')+'</span><div class="bio-texto">'+(bio1.texto||'')+'</div><div class="bio-porque"><strong>Por que funciona:</strong> '+(bio1.porque||'')+'</div></div>' +
     '<div class="bio-box"><span class="bio-tipo">Opcao 2 - '+(bio2.tipo||'Beneficio Direto')+'</span><div class="bio-texto">'+(bio2.texto||'')+'</div><div class="bio-porque"><strong>Por que funciona:</strong> '+(bio2.porque||'')+'</div></div>';
-
   const destaques = (a.destaques_estrategicos||[]).map(d=>'<div class="destaque-item"><div class="destaque-nome">'+(d.nome||'')+'</div><div class="destaque-funcao">Funcao: '+(d.funcao||'')+'</div><div class="destaque-conteudo">'+(d.conteudo||'')+'</div></div>').join('');
-
   const pilares = (a.pilares_conteudo||[]).map(p=>'<div class="pilar-item"><div class="pilar-pct">'+(p.percentual||'')+'</div><div><div class="pilar-nome">'+(p.nome||'')+'</div><div class="pilar-justificativa">'+(p.justificativa||'')+'</div></div></div>').join('');
-
-  // Legenda dos formatos
-  const legendaFormatos =
-    '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin-bottom:16px">' +
-    '<p style="font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Para que serve cada formato</p>' +
-    '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#c9cdd4">' +
-    '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(176,38,255,.2);color:#B026FF;border:1px solid rgba(176,38,255,.3);white-space:nowrap;flex-shrink:0">Video curto (Reels)</span>' +
-    '<span>Melhor para alcance (chegar em pessoas que ainda nao te seguem). O algoritmo distribui Reels para fora dos seus seguidores.</span></div>' +
-    '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:13px;color:#c9cdd4">' +
-    '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(255,41,192,.2);color:#FF29C0;border:1px solid rgba(255,41,192,.3);white-space:nowrap;flex-shrink:0">Carrossel (opcional)</span>' +
-    '<span>Funciona melhor para quem ja te segue — gera salvamentos e aprofunda o tema. Pode ser substituido por um Reels se preferir nao fazer posts com varios slides.</span></div>' +
-    '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;font-size:13px;color:#c9cdd4">' +
-    '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:rgba(180,170,215,.2);color:#B4AAD7;border:1px solid rgba(180,170,215,.3);white-space:nowrap;flex-shrink:0">Story</span>' +
-    '<span>Para quem ja te segue — mantem presenca diaria, gera conversas e e otimo para mostrar bastidores e fazer perguntas.</span></div>' +
-    '</div>';
-
   const ideias = (a.ideias_conteudo||[]).map((id,i)=>{
     const fmt = (id.formato||'Video curto');
     const isCarrossel = fmt.toLowerCase().includes('carrossel');
     const fmtLabel = isCarrossel ? fmt+' (pode substituir por Reels)' : fmt;
-    return '<div class="ideia"><div class="ideia-tags"><span class="tag tag-formato">'+fmtLabel+'</span><span class="tag tag-objetivo">Objetivo: '+(id.objetivo||'Alcance')+'</span></div><div class="titulo">'+(i+1)+'. '+(id.titulo||'')+'</div><div class="desc">'+(id.descricao||'')+'</div><div class="frase-abertura">Gancho — primeiros 3 segundos (a frase que prende quem esta passando): "'+(id.frase_abertura||id.hook||'')+'"</div></div>';
+    return '<div class="ideia"><div class="ideia-tags"><span class="tag tag-formato">'+fmtLabel+'</span><span class="tag tag-objetivo">Objetivo: '+(id.objetivo||'Alcance')+'</span></div><div class="titulo">'+(i+1)+'. '+(id.titulo||'')+'</div><div class="desc">'+(id.descricao||'')+'</div><div class="frase-abertura">Gancho: "'+(id.frase_abertura||id.hook||'')+'"</div></div>';
   }).join('');
-
-  // Stories — tenta varios nomes de campo possiveis
-  const storiesArr = a.dicas_stories || a.stories || a.dicas_de_stories || a.estrategia_stories || [];
+  const storiesArr = a.dicas_stories || a.stories || a.dicas_de_stories || [];
   const stories = storiesArr.length > 0
     ? storiesArr.map(s => typeof s === 'string' ? '<li>'+s+'</li>' : '<li>'+(s.dica||s.acao||JSON.stringify(s))+'</li>').join('')
-    : '<li style="color:var(--muted)">Consulte a estrategista para dicas personalizadas de stories para o seu nicho.</li>';
-
-  // Plano de acao — tenta varios nomes de campo possiveis
-  const planoArr = a.plano_acao || a.plano || a.acoes || a.cronograma || [];
+    : '<li style="color:var(--muted)">Fale com Mayara para dicas personalizadas.</li>';
+  const planoArr = a.plano_acao || a.plano || a.acoes || [];
   const plano = planoArr.length > 0
     ? planoArr.map(s=>{
-        const semana = s.semana || s.periodo || s.etapa || 'Acao';
-        const acao = s.acao || s.descricao || s.tarefa || (typeof s === 'string' ? s : '');
+        const semana = s.semana || s.periodo || 'Acao';
+        const acao = s.acao || s.descricao || (typeof s === 'string' ? s : '');
         const impacto = (s.impacto||'').toLowerCase();
         const cls = impacto==='alto'?'impacto-alto':impacto==='medio'?'impacto-medio':'impacto-baixo';
         return '<div class="semana-item"><div class="semana-label">'+semana+'</div><div class="semana-acao">'+acao+(s.impacto?' <span class="semana-impacto '+cls+'">Impacto '+s.impacto+'</span>':'')+'</div></div>';
       }).join('')
-    : '<div class="semana-item"><div class="semana-acao" style="color:var(--muted)">Plano de acao nao disponivel. Fale com Mayara para receber orientacao personalizada.</div></div>';
-
+    : '<div class="semana-item"><div class="semana-acao" style="color:var(--muted)">Fale com Mayara para orientacao personalizada.</div></div>';
   document.getElementById('conteudo').innerHTML =
     capa +
     '<h2 class="secao-titulo">Diagnostico Estrategico</h2>' +
@@ -835,11 +944,11 @@ function renderizar(dados) {
     '<div class="card"><h2>Destaques do Perfil</h2>'+destaques+'</div>' +
     '<h2 class="secao-titulo">Plano de Conteudo</h2>' +
     '<div class="card"><h2>Pilares de Conteudo</h2>'+pilares+'</div>' +
-    '<div class="card"><h2>Ideias de Conteudo Prontas</h2>'+legendaFormatos+ideias+'</div>' +
-    '<div class="card"><h2>Como Usar os Stories — publicacoes que somem em 24 horas</h2><ul>'+stories+'</ul></div>' +
+    '<div class="card"><h2>Ideias de Conteudo Prontas</h2>'+ideias+'</div>' +
+    '<div class="card"><h2>Como Usar os Stories</h2><ul>'+stories+'</ul></div>' +
     '<h2 class="secao-titulo">Plano de Acao</h2>' +
     '<div class="card"><h2>O que fazer semana a semana</h2>'+plano+'</div>' +
-    '<div class="cta-final"><div class="cta-titulo">Quer alguem fazendo isso <em>com voce</em>?</div><p class="cta-desc">Voce tem o mapa. Falta executar. A Execucao Estrategica e o acompanhamento 1:1 onde eu monto o calendario, ajusto o que nao performa e fico do seu lado semana a semana.</p><a href="https://wa.me/5567998390967?text=Quero%20saber%20mais%20sobre%20Execucao%20Estrategica" target="_blank" class="cta-botao">Quero Saber Mais</a><div class="cta-contato">Mayara Arruda - Estrategia de Conteudo - <strong>67 99839-0967</strong></div></div>' +
+    '<div class="cta-final"><div class="cta-titulo">Quer alguem fazendo isso <em>com voce</em>?</div><p class="cta-desc">Voce tem o mapa. Falta executar. A Execucao Estrategica e o acompanhamento 1:1 onde eu monto o calendario, ajusto o que nao performa e fico do seu lado semana a semana.</p><a href="https://wa.me/5567998390967?text=Quero%20saber%20mais%20sobre%20Execucao%20Estrategica" target="_blank" class="cta-botao">Quero Saber Mais</a><div class="cta-contato">Mayara Arruda - <strong>67 99839-0967</strong></div></div>' +
     '<div class="rodape">Mapa Estrategico Instagram - <strong>Mayara Arruda</strong> - 67 99839-0967</div>' +
     '<div class="footer-acoes nao-imprime"><button onclick="window.print()" class="botao">Baixar em PDF</button><a href="/" class="botao botao-sec">Voltar ao inicio</a></div>';
 }
@@ -847,7 +956,6 @@ carregar();
 </script>"""
     conteudo = conteudo.replace("__SESSION__", session_id)
     return render_pagina("Mapa Estrategico Instagram", conteudo)
-
 
 @app.route('/pendente')
 def pagina_pendente():
@@ -884,7 +992,6 @@ if (sessionId) verificar();
     conteudo = conteudo.replace("__SESSION__", session_id)
     return render_pagina("Pagamento Pendente", conteudo)
 
-
 @app.route('/erro')
 def pagina_erro():
     conteudo = """
@@ -895,7 +1002,6 @@ def pagina_erro():
   <a href="/" style="display:inline-block;background:linear-gradient(135deg,#B026FF,#FF29C0);color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;">Tentar novamente</a>
 </div>"""
     return render_pagina("Pagamento nao aprovado", conteudo)
-
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
