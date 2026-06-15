@@ -319,20 +319,49 @@ function toggleCidade() {
   document.getElementById('cidadeField').style.display = (loja === 'sim' || loja === 'hibrido') ? 'block' : 'none';
 }
 
+function comprimirImagem(file, maxBytes) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let w = img.width, h = img.height;
+        // Reduz dimensões se necessário
+        const MAX_DIM = 1200;
+        if (w > MAX_DIM || h > MAX_DIM) {
+          if (w > h) { h = Math.round(h * MAX_DIM / w); w = MAX_DIM; }
+          else { w = Math.round(w * MAX_DIM / h); h = MAX_DIM; }
+        }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        // Comprime até caber no limite
+        let quality = 0.85;
+        let result = canvas.toDataURL('image/jpeg', quality);
+        while (result.length * 0.75 > maxBytes && quality > 0.2) {
+          quality -= 0.1;
+          result = canvas.toDataURL('image/jpeg', quality);
+        }
+        resolve(result);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function handleFiles(files) {
   const grid = document.getElementById('previewGrid');
   grid.innerHTML = '';
   uploadedImages = [];
-  Array.from(files).slice(0, 5).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      uploadedImages.push(e.target.result);
-      const img = document.createElement('img');
-      img.src = e.target.result;
-      img.className = 'preview-img';
-      grid.appendChild(img);
-    };
-    reader.readAsDataURL(file);
+  const MAX_BYTES = 9 * 1024 * 1024; // 9 MB por imagem
+  Array.from(files).slice(0, 5).forEach(async (file) => {
+    const compressed = await comprimirImagem(file, MAX_BYTES);
+    uploadedImages.push(compressed);
+    const img = document.createElement('img');
+    img.src = compressed;
+    img.className = 'preview-img';
+    grid.appendChild(img);
   });
 }
 
